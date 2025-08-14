@@ -8,8 +8,8 @@ let playlistState = null;
 let currentMode = 'initial';
 let isDownloading = false;
 
-// 新API，获取音乐直链
-const apiBase = 'https://www.byfuns.top/api/1/';
+// 新API，获取音乐直链（已修改为你的 Worker 地址！）
+const apiBase = 'https://neteaseapi.clx327425.workers.dev/';
 // 原网易云API，仅用于搜索/歌单数据
 const cloudApi = 'https://163api.qijieya.cn';
 
@@ -274,7 +274,7 @@ document.addEventListener('click', async (e) => {
         const checkbox = e.target.closest('span').parentElement.querySelector('.song-checkbox');
         checkbox.checked = !checkbox.checked;
     }
-    // 预览功能（用byfuns直链）
+    // 预览功能（用你的 Worker 代理直链！）
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
@@ -313,7 +313,7 @@ document.addEventListener('click', async (e) => {
             previewDiv.classList.add('hidden');
         }
     }
-    // 单曲下载（用byfuns直链）
+    // 单曲下载（用你的 Worker 代理直链！）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
         const fileName = e.target.closest('.download-btn').dataset.name;
@@ -349,7 +349,7 @@ document.addEventListener('click', async (e) => {
     }
 });
 
-// 批量下载（用byfuns直链）
+// 批量下载（用你的 Worker 代理直链！）
 document.getElementById('download-btn').addEventListener('click', async () => {
     const checkboxes = document.querySelectorAll('.song-checkbox:checked');
     selectedSongs = Array.from(checkboxes).map(cb => ({
