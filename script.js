@@ -8,9 +8,9 @@ let playlistState = null;
 let currentMode = 'initial';
 let isDownloading = false;
 
-// byfuns API配置
+// 新API，获取音乐直链
 const apiBase = 'https://www.byfuns.top/api/1/';
-// 原网易云api，仅用于搜索/歌单等数据接口
+// 原网易云API，仅用于搜索/歌单数据
 const cloudApi = 'https://163api.qijieya.cn';
 
 document.getElementById('search-btn').addEventListener('click', async () => {
@@ -48,6 +48,7 @@ function showLoading(show) {
     }
 }
 
+// 原API用于搜索和歌单详情
 async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     for (let i = 0; i <= retries; i++) {
         const controller = new AbortController();
@@ -75,7 +76,6 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     }
 }
 
-// 搜索和歌单详情仍用原API
 async function searchMusic() {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -274,19 +274,12 @@ document.addEventListener('click', async (e) => {
         const checkbox = e.target.closest('span').parentElement.querySelector('.song-checkbox');
         checkbox.checked = !checkbox.checked;
     }
-    // --- 修改：预览功能使用byfuns API直链 ---
+    // 预览功能（用byfuns直链）
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
         showLoading(true);
         try {
-            // 原代码（注释保留）：
-            // const data = await fetchWithRetry(`${cloudApi}/song/url/v1?id=${songId}&level=${quality}`);
-            // if (!data.data[0]?.url) {...}
-            // let songUrl = data.data[0].url;
-            // if (songUrl.startsWith('http://')) {...}
-
-            // 新代码（byfuns API直链）:
             const url = `${apiBase}?id=${songId}&level=${quality}`;
             const response = await fetch(url);
             if (!response.ok) throw new Error('获取直链失败');
@@ -294,7 +287,7 @@ document.addEventListener('click', async (e) => {
             showLoading(false);
 
             if (!songUrl.startsWith('http')) {
-                alert('无法预览该歌曲！');
+                alert('无法预览该歌曲！API返回内容：' + songUrl);
                 return;
             }
             previewDiv.classList.remove('hidden');
@@ -320,7 +313,7 @@ document.addEventListener('click', async (e) => {
             previewDiv.classList.add('hidden');
         }
     }
-    // --- 修改：单曲下载功能使用byfuns API直链 ---
+    // 单曲下载（用byfuns直链）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
         const fileName = e.target.closest('.download-btn').dataset.name;
@@ -328,20 +321,12 @@ document.addEventListener('click', async (e) => {
         isDownloading = true;
         showLoading(true);
         try {
-            // 原代码（注释保留）：
-            // const data = await fetchWithRetry(`${cloudApi}/song/url/v1?id=${songId}&level=${quality}`);
-            // if (!data.data[0]?.url) {...}
-            // let songUrl = data.data[0].url;
-            // if (songUrl.startsWith('http://')) {...}
-            // const response = await fetch(songUrl);
-
-            // 新代码（byfuns API直链）:
             const url = `${apiBase}?id=${songId}&level=${quality}`;
             const response = await fetch(url);
             if (!response.ok) throw new Error('获取直链失败');
             let songUrl = await response.text();
             if (!songUrl.startsWith('http')) {
-                alert('无法下载该歌曲！');
+                alert('无法下载该歌曲！API返回内容：' + songUrl);
                 isDownloading = false;
                 showLoading(false);
                 return;
@@ -364,7 +349,7 @@ document.addEventListener('click', async (e) => {
     }
 });
 
-// --- 修改：批量下载功能使用byfuns API直链 ---
+// 批量下载（用byfuns直链）
 document.getElementById('download-btn').addEventListener('click', async () => {
     const checkboxes = document.querySelectorAll('.song-checkbox:checked');
     selectedSongs = Array.from(checkboxes).map(cb => ({
@@ -381,12 +366,6 @@ document.getElementById('download-btn').addEventListener('click', async () => {
     try {
         const zip = new JSZip();
         for (const song of selectedSongs) {
-            // 原代码（注释保留）：
-            // const data = await fetchWithRetry(`${cloudApi}/song/url/v1?id=${ids}&level=${quality}`);
-            // if (!data.data) {...}
-            // const promises = data.data.map(song => {...});
-
-            // 新代码（byfuns API直链）:
             const url = `${apiBase}?id=${song.id}&level=${quality}`;
             let songUrl = await fetch(url).then(r => r.text());
             if (!songUrl.startsWith('http')) continue;
