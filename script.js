@@ -13,6 +13,22 @@ const apiBase = 'https://api.lxchen.cn/api';
 // 原网易云API，仅用于搜索/歌单数据
 const cloudApi = 'https://163api.qijieya.cn';
 
+// 进度条显示函数（批量/单曲下载共用）
+function showProgress(show, percent = 0, info = "") {
+    const pc = document.getElementById('progress-container');
+    const pb = document.getElementById('progress-bar');
+    const pi = document.getElementById('progress-info');
+    if (show) {
+        pc.classList.remove('hidden');
+        pb.style.width = percent + "%";
+        pi.textContent = info;
+    } else {
+        pc.classList.add('hidden');
+        pb.style.width = "0%";
+        pi.textContent = "正在下载...";
+    }
+}
+
 document.getElementById('search-btn').addEventListener('click', async () => {
     searchType = document.getElementById('search-type').value;
     searchKeywords = document.getElementById('search-input').value.trim();
@@ -320,29 +336,43 @@ document.addEventListener('click', async (e) => {
         const quality = document.getElementById('quality-select').value || 'standard';
         isDownloading = true;
         showLoading(true);
+        showProgress(true, 0, "正在获取直链...");
         try {
             const url = `${apiBase}?id=${songId}&level=${quality}`;
             const response = await fetch(url);
             if (!response.ok) throw new Error('获取直链失败');
             let songUrl = await response.text();
+            showProgress(true, 30, "正在下载音频...");
             if (!songUrl.startsWith('http')) {
                 alert('无法下载该歌曲！API返回内容：' + songUrl);
                 isDownloading = false;
                 showLoading(false);
+                showProgress(false);
                 return;
             }
             const musicResponse = await fetch(songUrl);
             if (!musicResponse.ok) throw new Error('下载歌曲失败');
+            // Blob下载无法真实获取进度，只能模拟
+            let fakePercent = 30;
+            const fakeUpdate = setInterval(() => {
+                fakePercent += Math.random() * 10;
+                if (fakePercent > 90) fakePercent = 90;
+                showProgress(true, fakePercent, `下载进度：${Math.round(fakePercent)}%`);
+            }, 200);
             const blob = await musicResponse.blob();
+            clearInterval(fakeUpdate);
+            showProgress(true, 100, "准备保存...");
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = `${fileName}.mp3`;
             link.click();
+            setTimeout(() => showProgress(false), 700);
             isDownloading = false;
             showLoading(false);
         } catch (error) {
             isDownloading = false;
             showLoading(false);
+            showProgress(false);
             console.error('单曲下载失败:', error);
             alert('下载失败，请检查网络！');
         }
@@ -374,25 +404,42 @@ document.getElementById('download-btn').addEventListener('click', async () => {
     const quality = document.getElementById('quality-select').value || 'standard';
     isDownloading = true;
     showLoading(true);
+    showProgress(true, 0, "正在准备...");
     try {
         const zip = new JSZip();
-        for (const song of selectedSongs) {
+        const total = selectedSongs.length;
+        let startTime = Date.now();
+        for (let i = 0; i < total; i++) {
+            const song = selectedSongs[i];
             const url = `${apiBase}?id=${song.id}&level=${quality}`;
             let songUrl = await fetch(url).then(r => r.text());
             if (!songUrl.startsWith('http')) continue;
             let musicBlob = await fetch(songUrl).then(r => r.blob());
             zip.file(`${song.name}.mp3`, musicBlob);
+
+            // 更新进度
+            let percent = Math.round((i + 1) / total * 100);
+            let elapsed = (Date.now() - startTime) / 1000; // 秒
+            let avg = elapsed / (i + 1);
+            let remain = total - (i + 1);
+            let est = Math.round(avg * remain);
+            let info = `下载进度：${percent}% (${i + 1}/${total})`;
+            if (remain > 0) info += `，预计剩余${est}秒`;
+            showProgress(true, percent, info);
         }
+        showProgress(true, 100, "正在打包...");
         const content = await zip.generateAsync({ type: 'blob' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
-        link.download = `音乐下载_${getNowTimeStr()}.zip`; // 这里加了时间
+        link.download = `音乐下载_${getNowTimeStr()}.zip`;
         link.click();
         isDownloading = false;
         showLoading(false);
+        showProgress(false);
     } catch (error) {
         isDownloading = false;
         showLoading(false);
+        showProgress(false);
         console.error('批量下载失败:', error);
         alert('批量下载失败，请检查网络！');
     }
