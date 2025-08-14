@@ -8,12 +8,14 @@ let playlistState = null;
 let currentMode = 'initial';
 let isDownloading = false;
 
-// 新API，获取音乐直链（已修改为你的宝塔 Node.js API地址！）
+// 用于跨页多选记忆
+let selectedSongsIds = [];
+
+// API地址
 const apiBase = 'https://api.lxchen.cn/api';
-// 原网易云API，仅用于搜索/歌单数据
 const cloudApi = 'https://163api.qijieya.cn';
 
-// 进度条显示函数（批量/单曲下载共用）
+// 进度条显示函数
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
     const pb = document.getElementById('progress-bar');
@@ -37,6 +39,7 @@ document.getElementById('search-btn').addEventListener('click', async () => {
         return;
     }
     currentPage = 1;
+    selectedSongsIds = []; // 新搜索清空多选
 
     if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
         currentMode = 'playlist-songs';
@@ -64,7 +67,6 @@ function showLoading(show) {
     }
 }
 
-// 原API用于搜索和歌单详情
 async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     for (let i = 0; i <= retries; i++) {
         const controller = new AbortController();
@@ -146,11 +148,13 @@ function displaySongs(songs, containerId) {
     }
     songs.forEach(song => {
         const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
+        const checked = selectedSongsIds.includes(String(song.id)) ? 'checked' : '';
         const songDiv = document.createElement('div');
         songDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md transition-all duration-200';
         songDiv.innerHTML = `
             <img src="${song.al?.picUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-2">
-            <input type="checkbox" class="song-checkbox w-5 h-5 mr-2 appearance-none border-2 border-gray-400 rounded checked:bg-blue-500 checked:border-blue-500 transition-all duration-200" data-id="${song.id}">
+            <input type="checkbox" class="song-checkbox w-5 h-5 mr-2 appearance-none border-2 border-gray-400 rounded checked:bg-blue-500 checked:border-blue-500 transition-all duration-200"
+                data-id="${song.id}" ${checked}>
             <span class="flex-1 cursor-pointer" data-id="${song.id}">
                 ${song.name} <span class="text-gray-500 text-sm"> - ${artists}</span>
             </span>
@@ -167,6 +171,17 @@ function displaySongs(songs, containerId) {
             </button>
         `;
         resultsDiv.appendChild(songDiv);
+    });
+
+    resultsDiv.querySelectorAll('.song-checkbox').forEach(cb => {
+        cb.addEventListener('change', function() {
+            const songId = this.dataset.id;
+            if (this.checked) {
+                if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
+            } else {
+                selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
+            }
+        });
     });
 }
 
@@ -185,12 +200,15 @@ function displayPlaylists(playlists) {
         playlistDiv.dataset.trackCount = playlist.trackCount;
         playlistDiv.innerHTML = `
             <img src="${playlist.coverImgUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-5">
-            <span class="flex-1">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
+            <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
-        playlistDiv.addEventListener('dblclick', () => {
+        playlistDiv.addEventListener('click', (event) => {
+            // 如果未来有复选框，点击复选框不打开歌单
+            if (event.target.closest('input[type="checkbox"]')) return;
             currentMode = 'playlist-songs';
             playlistState = { ...playlistState, id: playlist.id, name: playlist.name, trackCount: playlist.trackCount };
             currentPage = 1;
+            selectedSongsIds = [];
             openPlaylist(playlist.id, playlist.name, playlist.trackCount);
         });
         resultsDiv.appendChild(playlistDiv);
@@ -269,13 +287,22 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
 function selectAllHandler() {
     const checkboxes = document.querySelectorAll('.song-checkbox');
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-    checkboxes.forEach(cb => cb.checked = !allChecked);
+    checkboxes.forEach(cb => {
+        cb.checked = !allChecked;
+        const songId = cb.dataset.id;
+        if (cb.checked) {
+            if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
+        } else {
+            selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
+        }
+    });
 }
 
 function backHandler() {
     currentMode = 'playlist';
     currentPage = playlistState.page || 1;
     searchKeywords = playlistState.keywords || searchKeywords;
+    selectedSongsIds = [];
     searchMusic();
     document.getElementById('playlist-details').classList.add('hidden');
 }
@@ -289,8 +316,13 @@ document.addEventListener('click', async (e) => {
     if (e.target.closest('span.cursor-pointer')) {
         const checkbox = e.target.closest('span').parentElement.querySelector('.song-checkbox');
         checkbox.checked = !checkbox.checked;
+        const songId = checkbox.dataset.id;
+        if (checkbox.checked) {
+            if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
+        } else {
+            selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
+        }
     }
-    // 预览功能（用你的宝塔 Node.js代理直链！）
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
@@ -329,7 +361,6 @@ document.addEventListener('click', async (e) => {
             previewDiv.classList.add('hidden');
         }
     }
-    // 单曲下载（用你的宝塔 Node.js代理直链！）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
         const fileName = e.target.closest('.download-btn').dataset.name;
@@ -352,7 +383,6 @@ document.addEventListener('click', async (e) => {
             }
             const musicResponse = await fetch(songUrl);
             if (!musicResponse.ok) throw new Error('下载歌曲失败');
-            // Blob下载无法真实获取进度，只能模拟
             let fakePercent = 30;
             const fakeUpdate = setInterval(() => {
                 fakePercent += Math.random() * 10;
@@ -379,7 +409,6 @@ document.addEventListener('click', async (e) => {
     }
 });
 
-// 获取当前时间字符串，格式如：2025年08月14日13:08
 function getNowTimeStr() {
     const now = new Date();
     const Y = now.getFullYear();
@@ -390,13 +419,15 @@ function getNowTimeStr() {
     return `${Y}年${M}月${D}日${h}-${m}`;
 }
 
-// 批量下载（用你的宝塔 Node.js代理直链！）
 document.getElementById('download-btn').addEventListener('click', async () => {
-    const checkboxes = document.querySelectorAll('.song-checkbox:checked');
-    selectedSongs = Array.from(checkboxes).map(cb => ({
-        id: cb.dataset.id,
-        name: cb.parentElement.querySelector('.download-btn').dataset.name
-    }));
+    const checkboxes = document.querySelectorAll('.song-checkbox');
+    selectedSongs = Array.from(checkboxes)
+        .filter(cb => selectedSongsIds.includes(cb.dataset.id))
+        .map(cb => ({
+            id: cb.dataset.id,
+            name: cb.parentElement.querySelector('.download-btn').dataset.name
+        }));
+
     if (selectedSongs.length === 0) {
         alert('请先选择歌曲！');
         return;
@@ -417,9 +448,8 @@ document.getElementById('download-btn').addEventListener('click', async () => {
             let musicBlob = await fetch(songUrl).then(r => r.blob());
             zip.file(`${song.name}.mp3`, musicBlob);
 
-            // 更新进度
             let percent = Math.round((i + 1) / total * 100);
-            let elapsed = (Date.now() - startTime) / 1000; // 秒
+            let elapsed = (Date.now() - startTime) / 1000;
             let avg = elapsed / (i + 1);
             let remain = total - (i + 1);
             let est = Math.round(avg * remain);
