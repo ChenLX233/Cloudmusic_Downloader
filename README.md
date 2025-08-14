@@ -1,6 +1,6 @@
 # Cloudmusic_Downloader
 这个项目来自于 https://github.com/Enashpinal/cloudmusic_downloader
-仅作有关版权及开源协议修改后发布
+仅作有关版权及开源协议修改后发布 请认准原作者
 
 部署在https://mscdownload.pages.dev
 对接网易云音乐API，支持关键词/ID搜索歌单、选择音质以及批量下载。
