@@ -10,12 +10,11 @@ let isDownloading = false;
 
 // 用于跨页多选记忆
 let selectedSongsIds = [];
+let allSongsMap = {}; // id -> song对象
 
-// API地址
 const apiBase = 'https://api.lxchen.cn/api';
 const cloudApi = 'https://163api.qijieya.cn';
 
-// 进度条显示函数
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
     const pb = document.getElementById('progress-bar');
@@ -39,7 +38,8 @@ document.getElementById('search-btn').addEventListener('click', async () => {
         return;
     }
     currentPage = 1;
-    selectedSongsIds = []; // 新搜索清空多选
+    selectedSongsIds = [];
+    allSongsMap = {};
 
     if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
         currentMode = 'playlist-songs';
@@ -147,23 +147,24 @@ function displaySongs(songs, containerId) {
         return;
     }
     songs.forEach(song => {
+        const idStr = String(song.id);
         const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
-        const checked = selectedSongsIds.includes(String(song.id)) ? 'checked' : '';
+        const checked = selectedSongsIds.includes(idStr) ? 'checked' : '';
         const songDiv = document.createElement('div');
         songDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md transition-all duration-200';
         songDiv.innerHTML = `
             <img src="${song.al?.picUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-2">
             <input type="checkbox" class="song-checkbox w-5 h-5 mr-2 appearance-none border-2 border-gray-400 rounded checked:bg-blue-500 checked:border-blue-500 transition-all duration-200"
-                data-id="${song.id}" ${checked}>
-            <span class="flex-1 cursor-pointer" data-id="${song.id}">
+                data-id="${idStr}" ${checked}>
+            <span class="flex-1 cursor-pointer" data-id="${idStr}">
                 ${song.name} <span class="text-gray-500 text-sm"> - ${artists}</span>
             </span>
-            <button class="download-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 hover:scale-105 transition-transform mr-2" data-id="${song.id}" data-name="${song.name} - ${artists}">
+            <button class="download-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 hover:scale-105 transition-transform mr-2" data-id="${idStr}" data-name="${song.name} - ${artists}">
                 <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                 </svg>
             </button>
-            <button class="preview-btn bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 hover:scale-105 transition-transform" data-id="${song.id}">
+            <button class="preview-btn bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 hover:scale-105 transition-transform" data-id="${idStr}">
                 <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.2A1 1 0 0010 9.768v4.464a1 1 0 001.555.832l3.197-2.2a1 1 0 000-1.664z"></path>
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -171,6 +172,12 @@ function displaySongs(songs, containerId) {
             </button>
         `;
         resultsDiv.appendChild(songDiv);
+
+        // 累计所有歌曲数据
+        allSongsMap[idStr] = {
+            id: idStr,
+            name: song.name + ' - ' + artists
+        };
     });
 
     resultsDiv.querySelectorAll('.song-checkbox').forEach(cb => {
@@ -203,12 +210,12 @@ function displayPlaylists(playlists) {
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
         playlistDiv.addEventListener('click', (event) => {
-            // 如果未来有复选框，点击复选框不打开歌单
             if (event.target.closest('input[type="checkbox"]')) return;
             currentMode = 'playlist-songs';
             playlistState = { ...playlistState, id: playlist.id, name: playlist.name, trackCount: playlist.trackCount };
             currentPage = 1;
             selectedSongsIds = [];
+            allSongsMap = {};
             openPlaylist(playlist.id, playlist.name, playlist.trackCount);
         });
         resultsDiv.appendChild(playlistDiv);
@@ -303,6 +310,7 @@ function backHandler() {
     currentPage = playlistState.page || 1;
     searchKeywords = playlistState.keywords || searchKeywords;
     selectedSongsIds = [];
+    allSongsMap = {};
     searchMusic();
     document.getElementById('playlist-details').classList.add('hidden');
 }
@@ -420,13 +428,7 @@ function getNowTimeStr() {
 }
 
 document.getElementById('download-btn').addEventListener('click', async () => {
-    const checkboxes = document.querySelectorAll('.song-checkbox');
-    selectedSongs = Array.from(checkboxes)
-        .filter(cb => selectedSongsIds.includes(cb.dataset.id))
-        .map(cb => ({
-            id: cb.dataset.id,
-            name: cb.parentElement.querySelector('.download-btn').dataset.name
-        }));
+    selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
 
     if (selectedSongs.length === 0) {
         alert('请先选择歌曲！');
