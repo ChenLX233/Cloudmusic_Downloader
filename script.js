@@ -349,6 +349,17 @@ document.addEventListener('click', async (e) => {
     }
 });
 
+// 获取当前时间字符串，格式如：2025年08月14日13:08
+function getNowTimeStr() {
+    const now = new Date();
+    const Y = now.getFullYear();
+    const M = String(now.getMonth() + 1).padStart(2, '0');
+    const D = String(now.getDate()).padStart(2, '0');
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    return `${Y}年${M}月${D}日${h}:${m}`;
+}
+
 // 批量下载（用你的宝塔 Node.js代理直链！）
 document.getElementById('download-btn').addEventListener('click', async () => {
     const checkboxes = document.querySelectorAll('.song-checkbox:checked');
@@ -375,7 +386,7 @@ document.getElementById('download-btn').addEventListener('click', async () => {
         const content = await zip.generateAsync({ type: 'blob' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
-        link.download = '音乐下载.zip';
+        link.download = `音乐下载_${getNowTimeStr()}.zip`; // 这里加了时间
         link.click();
         isDownloading = false;
         showLoading(false);
