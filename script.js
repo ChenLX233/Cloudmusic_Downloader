@@ -387,7 +387,7 @@ function getNowTimeStr() {
     const D = String(now.getDate()).padStart(2, '0');
     const h = String(now.getHours()).padStart(2, '0');
     const m = String(now.getMinutes()).padStart(2, '0');
-    return `${Y}年${M}月${D}日${h}:${m}`;
+    return `${Y}年${M}月${D}日${h}-${m}`;
 }
 
 // 批量下载（用你的宝塔 Node.js代理直链！）
