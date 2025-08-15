@@ -99,7 +99,7 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     }
 }
 
-// 动态插入批量操作按钮
+// 动态插入批量操作按钮（保留歌单全选和批量下载，单曲全选按钮功能修复）
 function renderBatchActionHeader() {
     const container = document.getElementById('batch-action-header');
     container.innerHTML = '';
@@ -149,9 +149,11 @@ function renderBatchActionHeader() {
             <button id="select-all-song-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有单曲</button>
         `;
         document.getElementById('select-all-song-btn').onclick = async () => {
+            // 获取所有单曲ID及所有单曲信息（跨页全选）
             let allIds = [];
             let total = totalItems;
             let perPage = 1000;
+            let newSongsMap = {};
             for (let i = 0; i < total; i += perPage) {
                 let data = await fetchWithRetry(
                     `${cloudApi}/cloudsearch?keywords=${encodeURIComponent(searchKeywords)}&type=1&limit=${perPage}&offset=${i}`
@@ -160,17 +162,14 @@ function renderBatchActionHeader() {
                 allIds = allIds.concat(items.map(s=>String(s.id)));
                 items.forEach(song => {
                     const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
-                    allSongsMap[String(song.id)] = {
+                    newSongsMap[String(song.id)] = {
                         id: String(song.id),
                         name: song.name + ' - ' + artists
                     };
                 });
             }
-            if (selectedSongsIds.length === allIds.length) {
-                selectedSongsIds = [];
-            } else {
-                selectedSongsIds = [...allIds];
-            }
+            allSongsMap = {...allSongsMap, ...newSongsMap};
+            selectedSongsIds = allIds;
             searchMusic();
         };
     }
