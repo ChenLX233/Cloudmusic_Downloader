@@ -8,13 +8,17 @@ let playlistState = null;
 let currentMode = 'initial';
 let isDownloading = false;
 
-// 用于跨页多选记忆
+// 跨页多选记忆
 let selectedSongsIds = [];
 let allSongsMap = {}; // id -> song对象
+let selectedPlaylistIds = [];
+let allPlaylistMap = {}; // id -> 歌单对象
+let allSongIdsInPlaylist = []; // 歌单详情页所有歌曲ID
 
 const apiBase = 'https://api.lxchen.cn/api';
 const cloudApi = 'https://163api.qijieya.cn';
 
+// 进度条
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
     const pb = document.getElementById('progress-bar');
@@ -30,6 +34,7 @@ function showProgress(show, percent = 0, info = "") {
     }
 }
 
+// 搜索按钮
 document.getElementById('search-btn').addEventListener('click', async () => {
     searchType = document.getElementById('search-type').value;
     searchKeywords = document.getElementById('search-input').value.trim();
@@ -40,7 +45,9 @@ document.getElementById('search-btn').addEventListener('click', async () => {
     currentPage = 1;
     selectedSongsIds = [];
     allSongsMap = {};
-
+    selectedPlaylistIds = [];
+    allPlaylistMap = {};
+    allSongIdsInPlaylist = [];
     if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
         currentMode = 'playlist-songs';
         await tryOpenPlaylistById(searchKeywords);
@@ -51,14 +58,17 @@ document.getElementById('search-btn').addEventListener('click', async () => {
     }
 });
 
+// 显示隐藏区块
 function showElements(show) {
     document.getElementById('options').classList.toggle('hidden', !show);
     document.getElementById('search-results').classList.toggle('hidden', !show);
     document.getElementById('pagination').classList.toggle('hidden', !show);
     document.getElementById('footer').classList.toggle('hidden', !show);
     document.getElementById('playlist-details').classList.toggle('hidden', !(show && currentMode === 'playlist-songs'));
+    document.getElementById('batch-action-header').classList.toggle('hidden', !(show && (currentMode === 'playlist' || currentMode === 'search')));
 }
 
+// loading
 function showLoading(show) {
     if (show) {
         document.getElementById('loading').classList.remove('hidden');
@@ -74,18 +84,13 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
         try {
             const response = await fetch(url, { ...options, signal: controller.signal });
             clearTimeout(timeoutId);
-            if (!response.ok) {
-                throw new Error(`HTTP 错误: ${response.status}`);
-            }
+            if (!response.ok) throw new Error(`HTTP 错误: ${response.status}`);
             const data = await response.json();
-            if (data.code !== 200) {
-                throw new Error(`API 错误: ${data.message || '响应代码非200'}`);
-            }
+            if (data.code !== 200) throw new Error(`API 错误: ${data.message || '响应代码非200'}`);
             return data;
         } catch (error) {
             clearTimeout(timeoutId);
             if (i < retries && error.name !== 'AbortError') {
-                console.warn(`请求失败，重试 ${i + 1}/${retries}:`, error);
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 continue;
             }
@@ -94,6 +99,85 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     }
 }
 
+// 动态插入批量操作按钮
+function renderBatchActionHeader() {
+    const container = document.getElementById('batch-action-header');
+    container.innerHTML = '';
+    if (currentMode === 'playlist') {
+        container.innerHTML = `
+            <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选歌单</button>
+            <button id="download-selected-playlists-btn" class="p-2 bg-green-500 hover-effect rounded text-white">下载选中歌单</button>
+        `;
+        document.getElementById('select-all-playlist-btn').onclick = () => {
+            const allIds = Object.keys(allPlaylistMap).map(String);
+            if (selectedPlaylistIds.length === allIds.length) {
+                selectedPlaylistIds = [];
+            } else {
+                selectedPlaylistIds = [...allIds];
+            }
+            displayPlaylists(playlistState.playlists);
+        };
+        document.getElementById('download-selected-playlists-btn').onclick = async () => {
+            if (selectedPlaylistIds.length === 0) {
+                alert('请先选择歌单！');
+                return;
+            }
+            if (!confirm(`将下载${selectedPlaylistIds.length}个歌单，每个歌单单独zip，最后打包zip。确定继续？`)) return;
+
+            showProgress(true, 1, "准备下载所有歌单...");
+            let mainZip = new JSZip();
+            for (let idx = 0; idx < selectedPlaylistIds.length; idx++) {
+                const pid = selectedPlaylistIds[idx];
+                const pname = allPlaylistMap[pid]?.name || `歌单_${pid}`;
+                showProgress(true, Math.round((idx/selectedPlaylistIds.length)*100), `下载歌单(${idx+1}/${selectedPlaylistIds.length}): ${pname}`);
+                const zipBlob = await batchDownloadPlaylistReturnZip(pid, pname); // 返回zip blob
+                if (zipBlob) {
+                    mainZip.file(`${pname}.zip`, zipBlob);
+                }
+            }
+            showProgress(true, 100, "正在最终打包所有歌单...");
+            const mainZipBlob = await mainZip.generateAsync({type:'blob'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(mainZipBlob);
+            link.download = `批量歌单下载_${getNowTimeStr()}.zip`;
+            link.click();
+            showProgress(false);
+        };
+    }
+    if (currentMode === 'search') {
+        container.innerHTML = `
+            <button id="select-all-song-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有单曲</button>
+        `;
+        document.getElementById('select-all-song-btn').onclick = async () => {
+            let allIds = [];
+            let total = totalItems;
+            let perPage = 1000;
+            for (let i = 0; i < total; i += perPage) {
+                let data = await fetchWithRetry(
+                    `${cloudApi}/cloudsearch?keywords=${encodeURIComponent(searchKeywords)}&type=1&limit=${perPage}&offset=${i}`
+                );
+                let items = data?.result?.songs || [];
+                allIds = allIds.concat(items.map(s=>String(s.id)));
+                items.forEach(song => {
+                    const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
+                    allSongsMap[String(song.id)] = {
+                        id: String(song.id),
+                        name: song.name + ' - ' + artists
+                    };
+                });
+            }
+            if (selectedSongsIds.length === allIds.length) {
+                selectedSongsIds = [];
+            } else {
+                selectedSongsIds = [...allIds];
+            }
+            searchMusic();
+        };
+    }
+    container.classList.remove('hidden');
+}
+
+// 歌单搜索/单曲搜索
 async function searchMusic() {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -111,13 +195,14 @@ async function searchMusic() {
             totalItems = data.result.playlistCount || 0;
         }
         renderPagination();
+        renderBatchActionHeader();
     } catch (error) {
         showLoading(false);
-        console.error('搜索失败:', error);
         alert(error.name === 'AbortError' ? '请求超时，请稍后重试！' : '搜索失败，请检查网络！');
     }
 }
 
+// 歌单ID直查
 async function tryOpenPlaylistById(playlistId) {
     showLoading(true);
     try {
@@ -132,14 +217,15 @@ async function tryOpenPlaylistById(playlistId) {
         }
     } catch (error) {
         showLoading(false);
-        console.error('获取歌单失败:', error);
         alert(error.name === 'AbortError' ? '请求超时，请稍后再试！' : '请求错误，请稍后再试');
         currentMode = 'playlist';
         searchMusic();
     }
 }
 
+// 单曲列表渲染
 function displaySongs(songs, containerId) {
+    renderBatchActionHeader();
     const resultsDiv = document.getElementById(containerId);
     resultsDiv.innerHTML = '';
     if (songs.length === 0) {
@@ -153,33 +239,27 @@ function displaySongs(songs, containerId) {
         const songDiv = document.createElement('div');
         songDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md transition-all duration-200';
         songDiv.innerHTML = `
-            <img src="${song.al?.picUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-2">
             <input type="checkbox" class="song-checkbox w-5 h-5 mr-2 appearance-none border-2 border-gray-400 rounded checked:bg-blue-500 checked:border-blue-500 transition-all duration-200"
                 data-id="${idStr}" ${checked}>
+            <img src="${song.al?.picUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-2">
             <span class="flex-1 cursor-pointer" data-id="${idStr}">
                 ${song.name} <span class="text-gray-500 text-sm"> - ${artists}</span>
             </span>
             <button class="download-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 hover:scale-105 transition-transform mr-2" data-id="${idStr}" data-name="${song.name} - ${artists}">
-                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                 </svg>
             </button>
             <button class="preview-btn bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 hover:scale-105 transition-transform" data-id="${idStr}">
-                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.2A1 1 0 0010 9.768v4.464a1 1 0 001.555.832l3.197-2.2a1 1 0 000-1.664z"></path>
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
             </button>
         `;
         resultsDiv.appendChild(songDiv);
-
-        // 累计所有歌曲数据
-        allSongsMap[idStr] = {
-            id: idStr,
-            name: song.name + ' - ' + artists
-        };
+        allSongsMap[idStr] = { id: idStr, name: song.name + ' - ' + artists };
     });
-
     resultsDiv.querySelectorAll('.song-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
             const songId = this.dataset.id;
@@ -192,7 +272,10 @@ function displaySongs(songs, containerId) {
     });
 }
 
+// 歌单列表渲染
 function displayPlaylists(playlists) {
+    renderBatchActionHeader();
+    allPlaylistMap = {};
     const resultsDiv = document.getElementById('search-results');
     resultsDiv.innerHTML = '';
     if (playlists.length === 0) {
@@ -200,12 +283,15 @@ function displayPlaylists(playlists) {
         return;
     }
     playlists.forEach(playlist => {
+        allPlaylistMap[playlist.id] = playlist;
+        const checked = selectedPlaylistIds.includes(String(playlist.id)) ? 'checked' : '';
         const playlistDiv = document.createElement('div');
         playlistDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md cursor-pointer transition-all duration-200';
         playlistDiv.dataset.id = playlist.id;
         playlistDiv.dataset.name = playlist.name;
         playlistDiv.dataset.trackCount = playlist.trackCount;
         playlistDiv.innerHTML = `
+            <input type="checkbox" class="playlist-checkbox w-5 h-5 mr-2" data-id="${playlist.id}" ${checked}>
             <img src="${playlist.coverImgUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-5">
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
@@ -220,8 +306,19 @@ function displayPlaylists(playlists) {
         });
         resultsDiv.appendChild(playlistDiv);
     });
+    resultsDiv.querySelectorAll('.playlist-checkbox').forEach(cb => {
+        cb.addEventListener('change', function() {
+            const pid = String(this.dataset.id);
+            if (this.checked) {
+                if (!selectedPlaylistIds.includes(pid)) selectedPlaylistIds.push(pid);
+            } else {
+                selectedPlaylistIds = selectedPlaylistIds.filter(id => id !== pid);
+            }
+        });
+    });
 }
 
+// 分页
 function renderPagination() {
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
@@ -268,6 +365,7 @@ function updatePagination() {
     }
 }
 
+// 歌单详情页
 async function openPlaylist(playlistId, playlistName, trackCount) {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -286,23 +384,30 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
         showElements(true);
     } catch (error) {
         showLoading(false);
-        console.error('获取歌单失败:', error);
         alert(error.name === 'AbortError' ? '加载歌单超时，请稍后重试！' : '获取歌单失败，请检查网络！');
     }
 }
 
-function selectAllHandler() {
-    const checkboxes = document.querySelectorAll('.song-checkbox');
-    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-    checkboxes.forEach(cb => {
-        cb.checked = !allChecked;
-        const songId = cb.dataset.id;
-        if (cb.checked) {
-            if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
-        } else {
-            selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
+// 歌单详情页全选所有歌曲（跨页）
+async function selectAllHandler() {
+    if (!playlistState?.id) return;
+    if (!allSongIdsInPlaylist.length) {
+        let detail = await fetchWithRetry(`${cloudApi}/playlist/detail?id=${playlistState.id}`);
+        let total = detail?.playlist?.trackCount || 0;
+        let perPage = 1000;
+        let allIds = [];
+        for (let i = 0; i < total; i += perPage) {
+            let tracks = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlistState.id}&limit=${perPage}&offset=${i}`);
+            allIds = allIds.concat(tracks.songs.map(s=>String(s.id)));
         }
-    });
+        allSongIdsInPlaylist = allIds;
+    }
+    if (selectedSongsIds.length === allSongIdsInPlaylist.length) {
+        selectedSongsIds = [];
+    } else {
+        selectedSongsIds = [...allSongIdsInPlaylist];
+    }
+    openPlaylist(playlistState.id, playlistState.name, playlistState.trackCount);
 }
 
 function backHandler() {
@@ -315,6 +420,7 @@ function backHandler() {
     document.getElementById('playlist-details').classList.add('hidden');
 }
 
+// 单曲列表和歌单详情事件
 document.addEventListener('click', async (e) => {
     const previewDiv = document.getElementById('preview');
     if (!e.target.closest('#preview') && !e.target.closest('.preview-btn') && !previewDiv.classList.contains('hidden')) {
@@ -364,7 +470,6 @@ document.addEventListener('click', async (e) => {
             });
         } catch (error) {
             showLoading(false);
-            console.error('预览失败:', error);
             alert('预览失败，请检查网络！');
             previewDiv.classList.add('hidden');
         }
@@ -411,7 +516,6 @@ document.addEventListener('click', async (e) => {
             isDownloading = false;
             showLoading(false);
             showProgress(false);
-            console.error('单曲下载失败:', error);
             alert('下载失败，请检查网络！');
         }
     }
@@ -427,9 +531,9 @@ function getNowTimeStr() {
     return `${Y}年${M}月${D}日${h}-${m}`;
 }
 
+// 单曲批量下载
 document.getElementById('download-btn').addEventListener('click', async () => {
     selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
-
     if (selectedSongs.length === 0) {
         alert('请先选择歌曲！');
         return;
@@ -472,7 +576,41 @@ document.getElementById('download-btn').addEventListener('click', async () => {
         isDownloading = false;
         showLoading(false);
         showProgress(false);
-        console.error('批量下载失败:', error);
         alert('批量下载失败，请检查网络！');
     }
 });
+
+// 歌单批量下载，返回zip blob（用于总zip嵌套打包）
+async function batchDownloadPlaylistReturnZip(pid, pname) {
+    showProgress(true, 0, `正在获取歌单: ${pname}`);
+    let allSongs = [];
+    try {
+        let detail = await fetchWithRetry(`${cloudApi}/playlist/detail?id=${pid}`);
+        let total = detail?.playlist?.trackCount || 0;
+        let perPage = 1000;
+        for (let i = 0; i < total; i += perPage) {
+            let tracks = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${pid}&limit=${perPage}&offset=${i}`);
+            allSongs = allSongs.concat(tracks.songs);
+            showProgress(true, Math.round((i+perPage)/total*80), `歌单加载进度: ${Math.min(i+perPage,total)}/${total}`);
+        }
+        let ids = allSongs.map(s => s.id);
+        let names = allSongs.map(s => s.name + ' - ' + (s.ar ? s.ar.map(a=>a.name).join(',') : ''));
+        const quality = document.getElementById('quality-select').value || 'standard';
+        const zip = new JSZip();
+        for (let i = 0; i < ids.length; i++) {
+            let url = `${apiBase}?id=${ids[i]}&level=${quality}`;
+            let songUrl = await fetch(url).then(r=>r.text());
+            if (!songUrl.startsWith('http')) continue;
+            let musicBlob = await fetch(songUrl).then(r=>r.blob());
+            zip.file(`${names[i]}.mp3`, musicBlob);
+            showProgress(true, 80 + Math.round((i+1)/ids.length*20), `下载进度: ${i+1}/${ids.length}`);
+        }
+        showProgress(true, 100, "正在打包...");
+        let content = await zip.generateAsync({type:'blob'});
+        return content;
+    } catch (err) {
+        showProgress(false);
+        alert(`${pname} 歌单下载失败: ` + err.message);
+        return null;
+    }
+}
