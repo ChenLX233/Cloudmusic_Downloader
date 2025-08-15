@@ -1,14 +1,9 @@
-<!--
-BY Enashpinal 
-项目地址(原作): https://github.com/Enashpinal/cloudmusic_downloader
-如有修改或二次开发，请注明你的署名与修改日期。
-    -->
 <!DOCTYPE html>
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>音乐批量下载器 By Enashpinal </title>
+    <title>音乐批量下载器 By Enashpinal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/browser-id3-writer@4.6.0/dist/browser-id3-writer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -89,18 +84,28 @@ BY Enashpinal
             font-size: 1rem;
             color: #222;
         }
+        @media (max-width: 600px) {
+            .container {
+                width: 100vw !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+            #search-input {
+                width: 98vw !important;
+            }
+        }
     </style>
 </head>
 <body class="font-sans min-h-screen flex flex-col">
     <header class="glass-effect py-6 shadow-lg">
         <div class="container mx-auto px-4">
             <h1 class="text-3xl font-bold text-center">音乐批量下载器</h1>
-            <div class="flex justify-center mt-4 gap-2">
+            <div class="flex justify-center mt-4 gap-2 flex-wrap">
                 <select id="search-type" class="p-2 bg-transparent glass-effect">
                     <option value="1">单曲</option>
                     <option value="1000">歌单</option>
                 </select>
-                <input type="text" id="search-input" placeholder="输入关键词以搜索  或输入歌单ID直接跳转" class="p-2 w-96 bg-transparent glass-effect">
+                <input type="text" id="search-input" placeholder="输入关键词以搜索 或输入歌单ID直接跳转" class="p-2 w-96 bg-transparent glass-effect">
                 <button id="search-btn" class="p-2 bg-blue-500 hover-effect">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
