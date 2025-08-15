@@ -102,7 +102,6 @@ function renderBatchActionHeader() {
         container.innerHTML = `
             <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有歌单</button>
             <button id="select-page-playlist-btn" class="p-2 bg-indigo-500 hover-effect rounded text-white">全选本页歌单</button>
-            <button id="download-selected-playlists-btn" class="p-2 bg-green-500 hover-effect rounded text-white">下载选中歌单</button>
         `;
         // 全选所有歌单（跨页）
         document.getElementById('select-all-playlist-btn').onclick = async () => {
@@ -144,32 +143,6 @@ function renderBatchActionHeader() {
                 });
             }
             displayPlaylists(playlistState.playlists);
-        };
-        document.getElementById('download-selected-playlists-btn').onclick = async () => {
-            if (selectedPlaylistIds.length === 0) {
-                alert('请先选择歌单！');
-                return;
-            }
-            if (!confirm(`将下载${selectedPlaylistIds.length}个歌单，每个歌单单独zip，最后打包zip。确定继续？`)) return;
-
-            showProgress(true, 1, "准备下载所有歌单...");
-            let mainZip = new JSZip();
-            for (let idx = 0; idx < selectedPlaylistIds.length; idx++) {
-                const pid = selectedPlaylistIds[idx];
-                const pname = allPlaylistMap[pid]?.name || `歌单_${pid}`;
-                showProgress(true, Math.round((idx/selectedPlaylistIds.length)*100), `下载歌单(${idx+1}/${selectedPlaylistIds.length}): ${pname}`);
-                const zipBlob = await batchDownloadPlaylistReturnZip(pid, pname);
-                if (zipBlob) {
-                    mainZip.file(`${pname}.zip`, zipBlob);
-                }
-            }
-            showProgress(true, 100, "正在最终打包所有歌单...");
-            const mainZipBlob = await mainZip.generateAsync({type:'blob'});
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(mainZipBlob);
-            link.download = `批量歌单下载_${getNowTimeStr()}.zip`;
-            link.click();
-            showProgress(false);
         };
     }
     if (currentMode === 'search') {
@@ -507,6 +480,12 @@ document.addEventListener('click', async (e) => {
             }
             const musicResponse = await fetch(songUrl);
             if (!musicResponse.ok) throw new Error('下载歌曲失败');
+            // 自动识别音频格式后缀
+            let ext = 'mp3';
+            try {
+                ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
+                if (!/^mp3|flac|wav|ape$/.test(ext)) ext = 'mp3';
+            } catch(e) { ext = 'mp3'; }
             let fakePercent = 30;
             const fakeUpdate = setInterval(() => {
                 fakePercent += Math.random() * 10;
@@ -518,7 +497,7 @@ document.addEventListener('click', async (e) => {
             showProgress(true, 100, "准备保存...");
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = `${fileName}.mp3`;
+            link.download = `${fileName}.${ext}`;
             link.click();
             setTimeout(() => showProgress(false), 700);
             isDownloading = false;
@@ -561,8 +540,14 @@ document.getElementById('download-btn').addEventListener('click', async () => {
             const url = `${apiBase}?id=${song.id}&level=${quality}`;
             let songUrl = await fetch(url).then(r => r.text());
             if (!songUrl.startsWith('http')) continue;
+            // 自动识别音频格式后缀
+            let ext = 'mp3';
+            try {
+                ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
+                if (!/^mp3|flac|wav|ape$/.test(ext)) ext = 'mp3';
+            } catch(e) { ext = 'mp3'; }
             let musicBlob = await fetch(songUrl).then(r => r.blob());
-            zip.file(`${song.name}.mp3`, musicBlob);
+            zip.file(`${song.name}.${ext}`, musicBlob);
 
             let percent = Math.round((i + 1) / total * 100);
             let elapsed = (Date.now() - startTime) / 1000;
@@ -610,8 +595,14 @@ async function batchDownloadPlaylistReturnZip(pid, pname) {
             let url = `${apiBase}?id=${ids[i]}&level=${quality}`;
             let songUrl = await fetch(url).then(r=>r.text());
             if (!songUrl.startsWith('http')) continue;
+            // 自动识别音频格式后缀
+            let ext = 'mp3';
+            try {
+                ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
+                if (!/^mp3|flac|wav|ape$/.test(ext)) ext = 'mp3';
+            } catch(e) { ext = 'mp3'; }
             let musicBlob = await fetch(songUrl).then(r=>r.blob());
-            zip.file(`${names[i]}.mp3`, musicBlob);
+            zip.file(`${names[i]}.${ext}`, musicBlob);
             showProgress(true, 80 + Math.round((i+1)/ids.length*20), `下载进度: ${i+1}/${ids.length}`);
         }
         showProgress(true, 100, "正在打包...");
