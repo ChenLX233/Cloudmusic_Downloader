@@ -1,16 +1,13 @@
+// 后端下载和写标签，前端只负责获取id和音质，所有元数据由后端自动获取
 const itemsPerPage = 20;
 let currentPage = 1;
 let totalItems = 0;
 let searchType = '1';
 let searchKeywords = '';
-let selectedSongs = [];
-let playlistState = null;
-let currentMode = 'initial';
-let isDownloading = false;
 let selectedSongsIds = [];
 let allSongsMap = {};
 const cloudApi = 'https://163api.qijieya.cn';
-const nodeDownloadApi = 'https://api.lxchen.cn/api';
+const nodeDownloadApi = 'https://api.lxchen.cn/api'; 
 
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
@@ -29,7 +26,7 @@ function showProgress(show, percent = 0, info = "") {
 function showLoading(show) {
     if (show) {
         document.getElementById('loading').classList.remove('hidden');
-    } else if (!isDownloading) {
+    } else {
         document.getElementById('loading').classList.add('hidden');
     }
 }
@@ -38,7 +35,7 @@ function showElements(show) {
     document.getElementById('search-results').classList.toggle('hidden', !show);
     document.getElementById('pagination').classList.toggle('hidden', !show);
     document.getElementById('footer').classList.toggle('hidden', !show);
-    document.getElementById('playlist-details').classList.toggle('hidden', !(show && currentMode === 'playlist-songs'));
+    document.getElementById('playlist-details').classList.toggle('hidden', !show);
 }
 function getNowTimeStr() {
     const now = new Date();
@@ -77,10 +74,8 @@ document.getElementById('search-btn').addEventListener('click', async () => {
     currentPage = 1; selectedSongsIds = []; allSongsMap = {};
 
     if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
-        currentMode = 'playlist-songs';
         await tryOpenPlaylistById(searchKeywords);
     } else {
-        currentMode = searchType === '1' ? 'search' : 'playlist';
         showElements(true);
         searchMusic();
     }
@@ -99,7 +94,6 @@ async function searchMusic() {
             displaySongs(data.result.songs || [], 'search-results');
             totalItems = data.result.songCount || 0;
         } else {
-            playlistState = { playlists: data.result.playlists || [], page: currentPage, keywords: searchKeywords };
             displayPlaylists(data.result.playlists || []);
             totalItems = data.result.playlistCount || 0;
         }
@@ -116,16 +110,14 @@ async function tryOpenPlaylistById(playlistId) {
     try {
         const data = await fetchWithRetry(`${cloudApi}/playlist/detail?id=${playlistId}`);
         if (data.playlist) {
-            currentMode = 'playlist-songs';
-            playlistState = { id: playlistId, name: data.playlist.name, trackCount: data.playlist.trackCount, page: currentPage };
             openPlaylist(playlistId, data.playlist.name, data.playlist.trackCount);
         } else {
-            currentMode = 'playlist'; searchMusic();
+            searchMusic();
         }
     } catch (error) {
         showLoading(false);
         alert(error.name === 'AbortError' ? '请求超时，请稍后再试！' : '请求错误，请稍后再试');
-        currentMode = 'playlist'; searchMusic();
+        searchMusic();
     }
 }
 
@@ -188,10 +180,6 @@ function displayPlaylists(playlists) {
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
         playlistDiv.addEventListener('click', (event) => {
-            if (event.target.closest('input[type="checkbox"]')) return;
-            currentMode = 'playlist-songs';
-            playlistState = { ...playlistState, id: playlist.id, name: playlist.name, trackCount: playlist.trackCount };
-            currentPage = 1; selectedSongsIds = []; allSongsMap = {};
             openPlaylist(playlist.id, playlist.name, playlist.trackCount);
         });
         resultsDiv.appendChild(playlistDiv);
@@ -202,31 +190,16 @@ function displayPlaylists(playlists) {
 function renderPagination() {
     const paginationDiv = document.getElementById('pagination'); paginationDiv.innerHTML = '';
     const totalPages = Math.ceil(totalItems / itemsPerPage);
-    if (totalPages <= 15) {
-        for (let i = 1; i <= totalPages; i++) {
-            const pageLink = document.createElement('a');
-            pageLink.href = '#'; pageLink.textContent = i;
-            pageLink.className = `px-3 py-1 rounded mx-1 ${i === currentPage ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`;
-            pageLink.addEventListener('click', (e) => { e.preventDefault(); currentPage = i; updatePagination(); });
-            paginationDiv.appendChild(pageLink);
-        }
-    } else {
-        const scrollContainer = document.createElement('div');
-        scrollContainer.className = 'overflow-x-auto whitespace-nowrap';
-        for (let i = 1; i <= totalPages; i++) {
-            const pageLink = document.createElement('a');
-            pageLink.href = '#'; pageLink.textContent = i;
-            pageLink.className = `inline-block px-3 py-1 rounded mx-1 ${i === currentPage ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`;
-            pageLink.addEventListener('click', (e) => { e.preventDefault(); currentPage = i; updatePagination(); });
-            scrollContainer.appendChild(pageLink);
-        }
-        paginationDiv.appendChild(scrollContainer);
+    for (let i = 1; i <= totalPages; i++) {
+        const pageLink = document.createElement('a');
+        pageLink.href = '#'; pageLink.textContent = i;
+        pageLink.className = `px-3 py-1 rounded mx-1 ${i === currentPage ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`;
+        pageLink.addEventListener('click', (e) => { e.preventDefault(); currentPage = i; updatePagination(); });
+        paginationDiv.appendChild(pageLink);
     }
 }
 function updatePagination() {
-    if (currentMode === 'playlist') searchMusic();
-    else if (currentMode === 'playlist-songs') openPlaylist(playlistState.id, playlistState.name, playlistState.trackCount);
-    else searchMusic();
+    searchMusic();
 }
 async function openPlaylist(playlistId, playlistName, trackCount) {
     showLoading(true);
@@ -235,11 +208,7 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
         const data = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlistId}&limit=${itemsPerPage}&offset=${offset}`);
         showLoading(false);
         document.getElementById('playlist-title').textContent = playlistName;
-        const selectAllBtn = document.getElementById('select-all-btn');
-        selectAllBtn.removeEventListener('click', selectAllHandler);
-        selectAllBtn.addEventListener('click', selectAllHandler);
-        document.getElementById('back-btn').removeEventListener('click', backHandler);
-        document.getElementById('back-btn').addEventListener('click', backHandler, { once: true });
+        document.getElementById('back-btn').onclick = () => { searchMusic(); document.getElementById('playlist-details').classList.add('hidden'); };
         displaySongs(data.songs, 'search-results');
         totalItems = trackCount || data.songs.length;
         renderPagination();
@@ -248,23 +217,6 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
         showLoading(false);
         alert(error.name === 'AbortError' ? '加载歌单超时，请稍后重试！' : '获取歌单失败，请检查网络！');
     }
-}
-function selectAllHandler() {
-    const checkboxes = document.querySelectorAll('.song-checkbox');
-    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-    checkboxes.forEach(cb => {
-        cb.checked = !allChecked;
-        const songId = cb.dataset.id;
-        if (cb.checked) { if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId); }
-        else { selectedSongsIds = selectedSongsIds.filter(id => id !== songId); }
-    });
-}
-function backHandler() {
-    currentMode = 'playlist';
-    currentPage = playlistState.page || 1;
-    searchKeywords = playlistState.keywords || searchKeywords;
-    selectedSongsIds = []; allSongsMap = {};
-    searchMusic(); document.getElementById('playlist-details').classList.add('hidden');
 }
 
 // 预览和下载按钮事件
@@ -280,13 +232,12 @@ document.addEventListener('click', async (e) => {
         if (checkbox.checked) { if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId); }
         else { selectedSongsIds = selectedSongsIds.filter(id => id !== songId); }
     }
-    // 预览（使用自建API）
+    // 预览（用后端 GET，返回直链）
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
         showLoading(true);
         try {
-            // API格式: https://api.lxchen.cn/api?id=<id>&level=<quality>
             const url = `${nodeDownloadApi}?id=${songId}&level=${quality}`;
             const response = await fetch(url);
             if (!response.ok) throw new Error('获取直链失败');
@@ -314,130 +265,57 @@ document.addEventListener('click', async (e) => {
             showLoading(false); alert('预览失败，请检查网络！'); previewDiv.classList.add('hidden');
         }
     }
-    // 下载单曲（使用自建API）
+    // 下载单曲（用后端 POST，自动写标签）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
         const songInfo = allSongsMap[songId];
         const fileName = songInfo ? `${songInfo.name} - ${songInfo.artists}` : e.target.closest('.download-btn').dataset.name;
         const quality = document.getElementById('quality-select').value || 'standard';
-        isDownloading = true; showLoading(true); showProgress(true, 0, "正在获取直链...");
+        showLoading(true); showProgress(true, 0, "正在下载...");
         try {
-            const url = `${nodeDownloadApi}?id=${songId}&level=${quality}`;
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('获取直链失败');
-            let songUrl = await response.text();
-
-            showProgress(true, 30, "正在下载音频...");
-            if (!songUrl.startsWith('http')) {
-                alert('无法下载该歌曲！API返回内容：' + songUrl);
-                isDownloading = false;
-                showLoading(false);
-                showProgress(false);
-                return;
-            }
-            const musicResponse = await fetch(songUrl);
-            if (!musicResponse.ok) throw new Error('下载歌曲失败');
-            let fakePercent = 30;
-            const fakeUpdate = setInterval(() => {
-                fakePercent += Math.random() * 10;
-                if (fakePercent > 90) fakePercent = 90;
-                showProgress(true, fakePercent, `下载进度：${Math.round(fakePercent)}%`);
-            }, 200);
-            const musicBlob = await musicResponse.blob();
-            clearInterval(fakeUpdate);
-            showProgress(true, 100, "准备保存...");
-            // 写入ID3标签（前端支持）
-            if (typeof ID3Writer !== "undefined" && songInfo) {
-                let coverBuffer = null;
-                if (songInfo.coverUrl) {
-                    try {
-                        const imgResp = await fetch(songInfo.coverUrl);
-                        const imgBlob = await imgResp.blob();
-                        coverBuffer = await imgBlob.arrayBuffer();
-                    } catch (e) {}
-                }
-                const arrayBuffer = await musicBlob.arrayBuffer();
-                const writer = new ID3Writer(new Uint8Array(arrayBuffer));
-                writer.setFrame('TIT2', songInfo.name)
-                    .setFrame('TPE1', [songInfo.artists])
-                    .setFrame('TALB', songInfo.album)
-                    .setFrame('TYER', songInfo.year || '')
-                    .setFrame('TBPM', songInfo.bitrate || '');
-                if (coverBuffer) {
-                    writer.setFrame('APIC', {
-                        type: 3,
-                        data: coverBuffer,
-                        description: 'Cover',
-                        useUnicodeEncoding: false
-                    });
-                }
-                writer.addTag();
-                const taggedBlob = writer.getBlob();
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(taggedBlob);
-                link.download = `${fileName}.mp3`;
-                link.click();
-            } else {
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(musicBlob);
-                link.download = `${fileName}.mp3`;
-                link.click();
-            }
+            const postData = { id: songId, level: quality };
+            const downloadResp = await fetch(nodeDownloadApi, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(postData)
+            });
+            if (!downloadResp.ok) throw new Error('后端下载失败');
+            showProgress(true, 70, "正在下载文件...");
+            const blob = await downloadResp.blob();
+            showProgress(true, 100, "下载完成，正在保存...");
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${fileName}.mp3`;
+            link.click();
             setTimeout(() => showProgress(false), 700);
-            isDownloading = false;
             showLoading(false);
         } catch (error) {
-            isDownloading = false; showLoading(false); showProgress(false);
+            showLoading(false); showProgress(false);
             alert('下载失败，请检查网络！');
         }
     }
 });
 
-// 批量下载 ZIP（依然用自建API获取直链）
+// 批量下载（前端循环 POST，打包zip）
 document.getElementById('download-btn').addEventListener('click', async () => {
-    selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
+    const selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
     if (!selectedSongs.length) return alert('请先选择歌曲！');
     const quality = document.getElementById('quality-select').value || 'standard';
-    isDownloading = true; showLoading(true); showProgress(true, 0, "正在准备...");
+    showLoading(true); showProgress(true, 0, "正在准备...");
+
     try {
         const zip = new JSZip();
         for (let i = 0; i < selectedSongs.length; i++) {
             const song = selectedSongs[i];
-            const url = `${nodeDownloadApi}?id=${song.id}&level=${quality}`;
-            let songUrl = await fetch(url).then(r => r.text());
-            if (!songUrl.startsWith('http')) continue;
-            let musicBlob = await fetch(songUrl).then(r => r.blob());
-            let coverBuffer = null;
-            if (song.coverUrl) {
-                try {
-                    const imgResp = await fetch(song.coverUrl);
-                    const imgBlob = await imgResp.blob();
-                    coverBuffer = await imgBlob.arrayBuffer();
-                } catch (e) {}
-            }
-            if (typeof ID3Writer !== "undefined") {
-                const arrayBuffer = await musicBlob.arrayBuffer();
-                const writer = new ID3Writer(new Uint8Array(arrayBuffer));
-                writer.setFrame('TIT2', song.name)
-                      .setFrame('TPE1', [song.artists])
-                      .setFrame('TALB', song.album)
-                      .setFrame('TYER', song.year || '')
-                      .setFrame('TBPM', song.bitrate || '');
-                if (coverBuffer) {
-                    writer.setFrame('APIC', {
-                        type: 3,
-                        data: coverBuffer,
-                        description: 'Cover',
-                        useUnicodeEncoding: false
-                    });
-                }
-                writer.addTag();
-                const taggedBlob = writer.getBlob();
-                zip.file(`${song.name} - ${song.artists}.mp3`, taggedBlob);
-            } else {
-                zip.file(`${song.name} - ${song.artists}.mp3`, musicBlob);
-            }
-
+            const postData = { id: song.id, level: quality };
+            const downloadResp = await fetch(nodeDownloadApi, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(postData)
+            });
+            if (!downloadResp.ok) continue;
+            const blob = await downloadResp.blob();
+            zip.file(`${song.name} - ${song.artists}.mp3`, blob);
             let percent = Math.round((i + 1) / selectedSongs.length * 100);
             showProgress(true, percent, `下载进度：${percent}% (${i + 1}/${selectedSongs.length})`);
         }
@@ -448,10 +326,9 @@ document.getElementById('download-btn').addEventListener('click', async () => {
         link.download = `音乐下载_${getNowTimeStr()}.zip`;
         link.click();
         setTimeout(() => showProgress(false), 700);
-        isDownloading = false;
         showLoading(false);
     } catch (error) {
-        isDownloading = false; showLoading(false); showProgress(false);
+        showLoading(false); showProgress(false);
         alert('批量下载失败，请检查网络！');
     }
 });
