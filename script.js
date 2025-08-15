@@ -34,7 +34,6 @@ function showProgress(show, percent = 0, info = "") {
     }
 }
 
-// 搜索按钮
 document.getElementById('search-btn').addEventListener('click', async () => {
     searchType = document.getElementById('search-type').value;
     searchKeywords = document.getElementById('search-input').value.trim();
@@ -58,7 +57,6 @@ document.getElementById('search-btn').addEventListener('click', async () => {
     }
 });
 
-// 显示隐藏区块
 function showElements(show) {
     document.getElementById('options').classList.toggle('hidden', !show);
     document.getElementById('search-results').classList.toggle('hidden', !show);
@@ -68,7 +66,6 @@ function showElements(show) {
     document.getElementById('batch-action-header').classList.toggle('hidden', !(show && (currentMode === 'playlist' || currentMode === 'search')));
 }
 
-// loading
 function showLoading(show) {
     if (show) {
         document.getElementById('loading').classList.remove('hidden');
@@ -99,22 +96,39 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     }
 }
 
-// 动态插入批量操作按钮（保留歌单全选和批量下载，单曲全选按钮功能修复）
+// --- 批量操作按钮渲染 ---
 function renderBatchActionHeader() {
     const container = document.getElementById('batch-action-header');
     container.innerHTML = '';
     if (currentMode === 'playlist') {
         container.innerHTML = `
-            <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选歌单</button>
+            <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有歌单</button>
             <button id="download-selected-playlists-btn" class="p-2 bg-green-500 hover-effect rounded text-white">下载选中歌单</button>
         `;
-        document.getElementById('select-all-playlist-btn').onclick = () => {
-            const allIds = Object.keys(allPlaylistMap).map(String);
+        document.getElementById('select-all-playlist-btn').onclick = async () => {
+            // 获取所有歌单ID及所有歌单信息（跨页全选）
+            let allIds = [];
+            let fullPlaylistMap = {};
+            let total = totalItems;
+            let perPage = 100;
+            showLoading(true);
+            for (let i = 0; i < total; i += perPage) {
+                let data = await fetchWithRetry(
+                    `${cloudApi}/cloudsearch?keywords=${encodeURIComponent(searchKeywords)}&type=1000&limit=${perPage}&offset=${i}`
+                );
+                let items = data?.result?.playlists || [];
+                allIds = allIds.concat(items.map(p=>String(p.id)));
+                items.forEach(p => {
+                    fullPlaylistMap[String(p.id)] = p;
+                });
+            }
+            showLoading(false);
             if (selectedPlaylistIds.length === allIds.length) {
                 selectedPlaylistIds = [];
             } else {
                 selectedPlaylistIds = [...allIds];
             }
+            allPlaylistMap = fullPlaylistMap;
             displayPlaylists(playlistState.playlists);
         };
         document.getElementById('download-selected-playlists-btn').onclick = async () => {
@@ -154,6 +168,7 @@ function renderBatchActionHeader() {
             let total = totalItems;
             let perPage = 1000;
             let newSongsMap = {};
+            showLoading(true);
             for (let i = 0; i < total; i += perPage) {
                 let data = await fetchWithRetry(
                     `${cloudApi}/cloudsearch?keywords=${encodeURIComponent(searchKeywords)}&type=1&limit=${perPage}&offset=${i}`
@@ -168,15 +183,20 @@ function renderBatchActionHeader() {
                     };
                 });
             }
-            allSongsMap = {...allSongsMap, ...newSongsMap};
-            selectedSongsIds = allIds;
+            showLoading(false);
+            if (selectedSongsIds.length === allIds.length) {
+                selectedSongsIds = [];
+            } else {
+                selectedSongsIds = [...allIds];
+            }
+            allSongsMap = newSongsMap;
             searchMusic();
         };
     }
     container.classList.remove('hidden');
 }
 
-// 歌单搜索/单曲搜索
+// --- 搜索 ---
 async function searchMusic() {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
