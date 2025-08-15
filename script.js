@@ -7,10 +7,8 @@ let selectedSongs = [];
 let playlistState = null;
 let currentMode = 'initial';
 let isDownloading = false;
-
-// 用于跨页多选记忆
 let selectedSongsIds = [];
-let allSongsMap = {}; // id -> song对象
+let allSongsMap = {};
 
 const apiBase = 'https://api.lxchen.cn/api';
 const cloudApi = 'https://163api.qijieya.cn';
@@ -173,10 +171,14 @@ function displaySongs(songs, containerId) {
         `;
         resultsDiv.appendChild(songDiv);
 
-        // 累计所有歌曲数据
         allSongsMap[idStr] = {
             id: idStr,
-            name: song.name + ' - ' + artists
+            name: song.name,
+            artists: artists,
+            album: song.al?.name || '',
+            year: song.publishTime ? new Date(song.publishTime).getFullYear() : '',
+            bitrate: song.privilege?.maxbr ? Math.round(song.privilege.maxbr/1000) + 'kbps' : '',
+            coverUrl: song.al?.picUrl || ''
         };
     });
 
@@ -371,7 +373,8 @@ document.addEventListener('click', async (e) => {
     }
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
-        const fileName = e.target.closest('.download-btn').dataset.name;
+        const songInfo = allSongsMap[songId];
+        const fileName = songInfo ? `${songInfo.name} - ${songInfo.artists}` : e.target.closest('.download-btn').dataset.name;
         const quality = document.getElementById('quality-select').value || 'standard';
         isDownloading = true;
         showLoading(true);
@@ -397,13 +400,47 @@ document.addEventListener('click', async (e) => {
                 if (fakePercent > 90) fakePercent = 90;
                 showProgress(true, fakePercent, `下载进度：${Math.round(fakePercent)}%`);
             }, 200);
-            const blob = await musicResponse.blob();
+            const musicBlob = await musicResponse.blob();
             clearInterval(fakeUpdate);
             showProgress(true, 100, "准备保存...");
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `${fileName}.mp3`;
-            link.click();
+
+            // 写入ID3标签
+            if (typeof ID3Writer !== "undefined" && songInfo) {
+                let coverBuffer = null;
+                if (songInfo.coverUrl) {
+                    try {
+                        const imgResp = await fetch(songInfo.coverUrl);
+                        const imgBlob = await imgResp.blob();
+                        coverBuffer = await imgBlob.arrayBuffer();
+                    } catch (e) {}
+                }
+                const arrayBuffer = await musicBlob.arrayBuffer();
+                const writer = new ID3Writer(new Uint8Array(arrayBuffer));
+                writer.setFrame('TIT2', songInfo.name)
+                    .setFrame('TPE1', [songInfo.artists])
+                    .setFrame('TALB', songInfo.album)
+                    .setFrame('TYER', songInfo.year || '')
+                    .setFrame('TBPM', songInfo.bitrate || '');
+                if (coverBuffer) {
+                    writer.setFrame('APIC', {
+                        type: 3,
+                        data: coverBuffer,
+                        description: 'Cover',
+                        useUnicodeEncoding: false
+                    });
+                }
+                writer.addTag();
+                const taggedBlob = writer.getBlob();
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(taggedBlob);
+                link.download = `${fileName}.mp3`;
+                link.click();
+            } else {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(musicBlob);
+                link.download = `${fileName}.mp3`;
+                link.click();
+            }
             setTimeout(() => showProgress(false), 700);
             isDownloading = false;
             showLoading(false);
@@ -424,7 +461,60 @@ function getNowTimeStr() {
     const D = String(now.getDate()).padStart(2, '0');
     const h = String(now.getHours()).padStart(2, '0');
     const m = String(now.getMinutes()).padStart(2, '0');
-    return `${Y}年${M}月${D}日${h}-${m}`;
+    return `${Y}年${M}月${D}日${h}_${m}`;
+}
+
+async function batchDownloadZip(songInfos, quality) {
+    const zip = new JSZip();
+    for (let i = 0; i < songInfos.length; i++) {
+        const song = songInfos[i];
+        const url = `${apiBase}?id=${song.id}&level=${quality}`;
+        let songUrl = await fetch(url).then(r => r.text());
+        if (!songUrl.startsWith('http')) continue;
+        let musicBlob = await fetch(songUrl).then(r => r.blob());
+
+        let coverBuffer = null;
+        if (song.coverUrl) {
+            try {
+                const imgResp = await fetch(song.coverUrl);
+                const imgBlob = await imgResp.blob();
+                coverBuffer = await imgBlob.arrayBuffer();
+            } catch (e) {}
+        }
+
+        if (typeof ID3Writer !== "undefined") {
+            const arrayBuffer = await musicBlob.arrayBuffer();
+            const writer = new ID3Writer(new Uint8Array(arrayBuffer));
+            writer.setFrame('TIT2', song.name)
+                  .setFrame('TPE1', [song.artists])
+                  .setFrame('TALB', song.album)
+                  .setFrame('TYER', song.year || '')
+                  .setFrame('TBPM', song.bitrate || '');
+            if (coverBuffer) {
+                writer.setFrame('APIC', {
+                    type: 3,
+                    data: coverBuffer,
+                    description: 'Cover',
+                    useUnicodeEncoding: false
+                });
+            }
+            writer.addTag();
+            const taggedBlob = writer.getBlob();
+            zip.file(`${song.name} - ${song.artists}.mp3`, taggedBlob);
+        } else {
+            zip.file(`${song.name} - ${song.artists}.mp3`, musicBlob);
+        }
+
+        let percent = Math.round((i + 1) / songInfos.length * 100);
+        showProgress(true, percent, `下载进度：${percent}% (${i + 1}/${songInfos.length})`);
+    }
+    showProgress(true, 100, "正在打包...");
+    const content = await zip.generateAsync({ type: 'blob' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = `音乐下载_${getNowTimeStr()}.zip`;
+    link.click();
+    setTimeout(() => showProgress(false), 700);
 }
 
 document.getElementById('download-btn').addEventListener('click', async () => {
@@ -438,33 +528,9 @@ document.getElementById('download-btn').addEventListener('click', async () => {
     isDownloading = true;
     showLoading(true);
     showProgress(true, 0, "正在准备...");
-    try {
-        const zip = new JSZip();
-        const total = selectedSongs.length;
-        let startTime = Date.now();
-        for (let i = 0; i < total; i++) {
-            const song = selectedSongs[i];
-            const url = `${apiBase}?id=${song.id}&level=${quality}`;
-            let songUrl = await fetch(url).then(r => r.text());
-            if (!songUrl.startsWith('http')) continue;
-            let musicBlob = await fetch(songUrl).then(r => r.blob());
-            zip.file(`${song.name}.mp3`, musicBlob);
 
-            let percent = Math.round((i + 1) / total * 100);
-            let elapsed = (Date.now() - startTime) / 1000;
-            let avg = elapsed / (i + 1);
-            let remain = total - (i + 1);
-            let est = Math.round(avg * remain);
-            let info = `下载进度：${percent}% (${i + 1}/${total})`;
-            if (remain > 0) info += `，预计剩余${est}秒`;
-            showProgress(true, percent, info);
-        }
-        showProgress(true, 100, "正在打包...");
-        const content = await zip.generateAsync({ type: 'blob' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
-        link.download = `音乐下载_${getNowTimeStr()}.zip`;
-        link.click();
+    try {
+        await batchDownloadZip(selectedSongs, quality);
         isDownloading = false;
         showLoading(false);
         showProgress(false);
@@ -472,7 +538,6 @@ document.getElementById('download-btn').addEventListener('click', async () => {
         isDownloading = false;
         showLoading(false);
         showProgress(false);
-        console.error('批量下载失败:', error);
         alert('批量下载失败，请检查网络！');
     }
 });
