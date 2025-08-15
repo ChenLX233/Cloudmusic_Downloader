@@ -9,10 +9,7 @@ let currentMode = 'initial';
 let isDownloading = false;
 let selectedSongsIds = [];
 let allSongsMap = {};
-
 const cloudApi = 'https://163api.qijieya.cn';
-
-// NodeJS后端服务地址
 const nodeDownloadApi = 'https://api.lxchen.cn/api';
 
 function showProgress(show, percent = 0, info = "") {
@@ -29,17 +26,55 @@ function showProgress(show, percent = 0, info = "") {
         pi.textContent = "正在下载...";
     }
 }
+function showLoading(show) {
+    if (show) {
+        document.getElementById('loading').classList.remove('hidden');
+    } else if (!isDownloading) {
+        document.getElementById('loading').classList.add('hidden');
+    }
+}
+function showElements(show) {
+    document.getElementById('options').classList.toggle('hidden', !show);
+    document.getElementById('search-results').classList.toggle('hidden', !show);
+    document.getElementById('pagination').classList.toggle('hidden', !show);
+    document.getElementById('footer').classList.toggle('hidden', !show);
+    document.getElementById('playlist-details').classList.toggle('hidden', !(show && currentMode === 'playlist-songs'));
+}
+function getNowTimeStr() {
+    const now = new Date();
+    const Y = now.getFullYear(), M = String(now.getMonth() + 1).padStart(2, '0'), D = String(now.getDate()).padStart(2, '0');
+    const h = String(now.getHours()).padStart(2, '0'), m = String(now.getMinutes()).padStart(2, '0');
+    return `${Y}年${M}月${D}日${h}_${m}`;
+}
 
+async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
+    for (let i = 0; i <= retries; i++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        try {
+            const response = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (!response.ok) throw new Error(`HTTP错误: ${response.status}`);
+            const data = await response.json();
+            if (data.code !== 200) throw new Error(`API错误: ${data.message || '响应代码非200'}`);
+            return data;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (i < retries && error.name !== 'AbortError') {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
+            }
+            throw error;
+        }
+    }
+}
+
+// 搜索入口
 document.getElementById('search-btn').addEventListener('click', async () => {
     searchType = document.getElementById('search-type').value;
     searchKeywords = document.getElementById('search-input').value.trim();
-    if (!searchKeywords) {
-        alert('请输入搜索关键词！');
-        return;
-    }
-    currentPage = 1;
-    selectedSongsIds = [];
-    allSongsMap = {};
+    if (!searchKeywords) return alert('请输入搜索关键词！');
+    currentPage = 1; selectedSongsIds = []; allSongsMap = {};
 
     if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
         currentMode = 'playlist-songs';
@@ -51,49 +86,7 @@ document.getElementById('search-btn').addEventListener('click', async () => {
     }
 });
 
-function showElements(show) {
-    document.getElementById('options').classList.toggle('hidden', !show);
-    document.getElementById('search-results').classList.toggle('hidden', !show);
-    document.getElementById('pagination').classList.toggle('hidden', !show);
-    document.getElementById('footer').classList.toggle('hidden', !show);
-    document.getElementById('playlist-details').classList.toggle('hidden', !(show && currentMode === 'playlist-songs'));
-}
-
-function showLoading(show) {
-    if (show) {
-        document.getElementById('loading').classList.remove('hidden');
-    } else if (!isDownloading) {
-        document.getElementById('loading').classList.add('hidden');
-    }
-}
-
-async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
-    for (let i = 0; i <= retries; i++) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-        try {
-            const response = await fetch(url, { ...options, signal: controller.signal });
-            clearTimeout(timeoutId);
-            if (!response.ok) {
-                throw new Error(`HTTP 错误: ${response.status}`);
-            }
-            const data = await response.json();
-            if (data.code !== 200) {
-                throw new Error(`API 错误: ${data.message || '响应代码非200'}`);
-            }
-            return data;
-        } catch (error) {
-            clearTimeout(timeoutId);
-            if (i < retries && error.name !== 'AbortError') {
-                console.warn(`请求失败，重试 ${i + 1}/${retries}:`, error);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                continue;
-            }
-            throw error;
-        }
-    }
-}
-
+// 搜索单曲或歌单
 async function searchMusic() {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -113,11 +106,11 @@ async function searchMusic() {
         renderPagination();
     } catch (error) {
         showLoading(false);
-        console.error('搜索失败:', error);
         alert(error.name === 'AbortError' ? '请求超时，请稍后重试！' : '搜索失败，请检查网络！');
     }
 }
 
+// 歌单ID直达
 async function tryOpenPlaylistById(playlistId) {
     showLoading(true);
     try {
@@ -127,28 +120,22 @@ async function tryOpenPlaylistById(playlistId) {
             playlistState = { id: playlistId, name: data.playlist.name, trackCount: data.playlist.trackCount, page: currentPage };
             openPlaylist(playlistId, data.playlist.name, data.playlist.trackCount);
         } else {
-            currentMode = 'playlist';
-            searchMusic();
+            currentMode = 'playlist'; searchMusic();
         }
     } catch (error) {
         showLoading(false);
-        console.error('获取歌单失败:', error);
         alert(error.name === 'AbortError' ? '请求超时，请稍后再试！' : '请求错误，请稍后再试');
-        currentMode = 'playlist';
-        searchMusic();
+        currentMode = 'playlist'; searchMusic();
     }
 }
 
+// 展示单曲列表
 function displaySongs(songs, containerId) {
-    const resultsDiv = document.getElementById(containerId);
-    resultsDiv.innerHTML = '';
-    if (songs.length === 0) {
-        resultsDiv.innerHTML = '<p>无结果</p>';
-        return;
-    }
+    const resultsDiv = document.getElementById(containerId); resultsDiv.innerHTML = '';
+    if (!songs.length) return resultsDiv.innerHTML = '<p>无结果</p>';
     songs.forEach(song => {
         const idStr = String(song.id);
-        const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
+        const artists = song.ar ? song.ar.map(a => a.name).join(', ') : (song.artists || []).map(a => a.name).join(', ');
         const checked = selectedSongsIds.includes(idStr) ? 'checked' : '';
         const songDiv = document.createElement('div');
         songDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md transition-all duration-200';
@@ -160,49 +147,36 @@ function displaySongs(songs, containerId) {
                 ${song.name} <span class="text-gray-500 text-sm"> - ${artists}</span>
             </span>
             <button class="download-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 hover:scale-105 transition-transform mr-2" data-id="${idStr}" data-name="${song.name} - ${artists}">
-                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                </svg>
+                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
             </button>
             <button class="preview-btn bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 hover:scale-105 transition-transform" data-id="${idStr}">
-                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.2A1 1 0 0010 9.768v4.464a1 1 0 001.555.832l3.197-2.2a1 1 0 000-1.664z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
+                <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.2A1 1 0 0010 9.768v4.464a1 1 0 001.555.832l3.197-2.2a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             </button>
         `;
         resultsDiv.appendChild(songDiv);
-
         allSongsMap[idStr] = {
             id: idStr,
             name: song.name,
-            artists: artists,
+            artists,
             album: song.al?.name || '',
             year: song.publishTime ? new Date(song.publishTime).getFullYear() : '',
             bitrate: song.privilege?.maxbr ? Math.round(song.privilege.maxbr/1000) + 'kbps' : '',
             coverUrl: song.al?.picUrl || ''
         };
     });
-
     resultsDiv.querySelectorAll('.song-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
             const songId = this.dataset.id;
-            if (this.checked) {
-                if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
-            } else {
-                selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
-            }
+            if (this.checked) { if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId); }
+            else { selectedSongsIds = selectedSongsIds.filter(id => id !== songId); }
         });
     });
 }
 
+// 展示歌单列表
 function displayPlaylists(playlists) {
-    const resultsDiv = document.getElementById('search-results');
-    resultsDiv.innerHTML = '';
-    if (playlists.length === 0) {
-        resultsDiv.innerHTML = '<p>无结果</p>';
-        return;
-    }
+    const resultsDiv = document.getElementById('search-results'); resultsDiv.innerHTML = '';
+    if (!playlists.length) return resultsDiv.innerHTML = '<p>无结果</p>';
     playlists.forEach(playlist => {
         const playlistDiv = document.createElement('div');
         playlistDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md cursor-pointer transition-all duration-200';
@@ -217,30 +191,23 @@ function displayPlaylists(playlists) {
             if (event.target.closest('input[type="checkbox"]')) return;
             currentMode = 'playlist-songs';
             playlistState = { ...playlistState, id: playlist.id, name: playlist.name, trackCount: playlist.trackCount };
-            currentPage = 1;
-            selectedSongsIds = [];
-            allSongsMap = {};
+            currentPage = 1; selectedSongsIds = []; allSongsMap = {};
             openPlaylist(playlist.id, playlist.name, playlist.trackCount);
         });
         resultsDiv.appendChild(playlistDiv);
     });
 }
 
+// 分页渲染
 function renderPagination() {
-    const paginationDiv = document.getElementById('pagination');
-    paginationDiv.innerHTML = '';
+    const paginationDiv = document.getElementById('pagination'); paginationDiv.innerHTML = '';
     const totalPages = Math.ceil(totalItems / itemsPerPage);
     if (totalPages <= 15) {
         for (let i = 1; i <= totalPages; i++) {
             const pageLink = document.createElement('a');
-            pageLink.href = '#';
-            pageLink.textContent = i;
+            pageLink.href = '#'; pageLink.textContent = i;
             pageLink.className = `px-3 py-1 rounded mx-1 ${i === currentPage ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`;
-            pageLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                currentPage = i;
-                updatePagination();
-            });
+            pageLink.addEventListener('click', (e) => { e.preventDefault(); currentPage = i; updatePagination(); });
             paginationDiv.appendChild(pageLink);
         }
     } else {
@@ -248,30 +215,19 @@ function renderPagination() {
         scrollContainer.className = 'overflow-x-auto whitespace-nowrap';
         for (let i = 1; i <= totalPages; i++) {
             const pageLink = document.createElement('a');
-            pageLink.href = '#';
-            pageLink.textContent = i;
+            pageLink.href = '#'; pageLink.textContent = i;
             pageLink.className = `inline-block px-3 py-1 rounded mx-1 ${i === currentPage ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`;
-            pageLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                currentPage = i;
-                updatePagination();
-            });
+            pageLink.addEventListener('click', (e) => { e.preventDefault(); currentPage = i; updatePagination(); });
             scrollContainer.appendChild(pageLink);
         }
         paginationDiv.appendChild(scrollContainer);
     }
 }
-
 function updatePagination() {
-    if (currentMode === 'playlist') {
-        searchMusic();
-    } else if (currentMode === 'playlist-songs') {
-        openPlaylist(playlistState.id, playlistState.name, playlistState.trackCount);
-    } else {
-        searchMusic();
-    }
+    if (currentMode === 'playlist') searchMusic();
+    else if (currentMode === 'playlist-songs') openPlaylist(playlistState.id, playlistState.name, playlistState.trackCount);
+    else searchMusic();
 }
-
 async function openPlaylist(playlistId, playlistName, trackCount) {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -290,64 +246,54 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
         showElements(true);
     } catch (error) {
         showLoading(false);
-        console.error('获取歌单失败:', error);
         alert(error.name === 'AbortError' ? '加载歌单超时，请稍后重试！' : '获取歌单失败，请检查网络！');
     }
 }
-
 function selectAllHandler() {
     const checkboxes = document.querySelectorAll('.song-checkbox');
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     checkboxes.forEach(cb => {
         cb.checked = !allChecked;
         const songId = cb.dataset.id;
-        if (cb.checked) {
-            if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
-        } else {
-            selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
-        }
+        if (cb.checked) { if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId); }
+        else { selectedSongsIds = selectedSongsIds.filter(id => id !== songId); }
     });
 }
-
 function backHandler() {
     currentMode = 'playlist';
     currentPage = playlistState.page || 1;
     searchKeywords = playlistState.keywords || searchKeywords;
-    selectedSongsIds = [];
-    allSongsMap = {};
-    searchMusic();
-    document.getElementById('playlist-details').classList.add('hidden');
+    selectedSongsIds = []; allSongsMap = {};
+    searchMusic(); document.getElementById('playlist-details').classList.add('hidden');
 }
 
+// 预览和下载按钮事件
 document.addEventListener('click', async (e) => {
     const previewDiv = document.getElementById('preview');
     if (!e.target.closest('#preview') && !e.target.closest('.preview-btn') && !previewDiv.classList.contains('hidden')) {
-        previewDiv.classList.add('hidden');
-        previewDiv.innerHTML = '';
+        previewDiv.classList.add('hidden'); previewDiv.innerHTML = '';
     }
     if (e.target.closest('span.cursor-pointer')) {
         const checkbox = e.target.closest('span').parentElement.querySelector('.song-checkbox');
         checkbox.checked = !checkbox.checked;
         const songId = checkbox.dataset.id;
-        if (checkbox.checked) {
-            if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
-        } else {
-            selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
-        }
+        if (checkbox.checked) { if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId); }
+        else { selectedSongsIds = selectedSongsIds.filter(id => id !== songId); }
     }
+    // 预览（使用自建API）
     if (e.target.closest('.preview-btn')) {
-        // 预览不变
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
         showLoading(true);
         try {
-            // 这里预览用前端API或你自己的后端API（如node服务）
-            const url = `${cloudApi}/song/url?id=${songId}&level=${quality}`;
-            const resp = await fetch(url);
-            const data = await resp.json();
+            // API格式: https://api.lxchen.cn/api?id=<id>&level=<quality>
+            const url = `${nodeDownloadApi}?id=${songId}&level=${quality}`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('获取直链失败');
+            let songUrl = await response.text();
             showLoading(false);
-            const songUrl = data.data?.[0]?.url;
-            if (!songUrl || !songUrl.startsWith('http')) {
+
+            if (!songUrl.startsWith('http')) {
                 alert('无法预览该歌曲！API返回内容：' + songUrl);
                 return;
             }
@@ -363,133 +309,149 @@ document.addEventListener('click', async (e) => {
                     <button class="close-preview mt-2 bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600">关闭</button>
                 </div>
             `;
-            previewDiv.querySelector('.close-preview').addEventListener('click', () => {
-                previewDiv.classList.add('hidden');
-                previewDiv.innerHTML = '';
-            });
+            previewDiv.querySelector('.close-preview').addEventListener('click', () => { previewDiv.classList.add('hidden'); previewDiv.innerHTML = ''; });
         } catch (error) {
-            showLoading(false);
-            alert('预览失败，请检查网络！');
-            previewDiv.classList.add('hidden');
+            showLoading(false); alert('预览失败，请检查网络！'); previewDiv.classList.add('hidden');
         }
     }
-    // 单曲下载触发 NodeJS 服务
+    // 下载单曲（使用自建API）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
+        const songInfo = allSongsMap[songId];
+        const fileName = songInfo ? `${songInfo.name} - ${songInfo.artists}` : e.target.closest('.download-btn').dataset.name;
         const quality = document.getElementById('quality-select').value || 'standard';
-        isDownloading = true;
-        showLoading(true);
-        showProgress(true, 0, "准备获取元数据...");
-
+        isDownloading = true; showLoading(true); showProgress(true, 0, "正在获取直链...");
         try {
-            // 从 qijieya.cn 获取元数据
-            const metaResp = await fetch(`${cloudApi}/song/detail?ids=${songId}`);
-            const metaJson = await metaResp.json();
-            if (!metaJson.songs || !metaJson.songs.length) throw new Error('元数据获取失败');
-            const songMeta = metaJson.songs[0];
+            const url = `${nodeDownloadApi}?id=${songId}&level=${quality}`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('获取直链失败');
+            let songUrl = await response.text();
 
-            showProgress(true, 30, "正在请求后端下载...");
-            // POST 到 NodeJS后端（需你实现 /api/download 接口，返回下载链接或文件）
-            const postData = {
-                id: songId,
-                quality,
-                meta: songMeta
-            };
-            const downloadResp = await fetch(nodeDownloadApi, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(postData)
-            });
-            if (!downloadResp.ok) throw new Error('后端下载失败');
-            const blob = await downloadResp.blob();
-
-            showProgress(true, 100, "下载完成，正在保存...");
-            // 自动下载
-            const fileName = `${songMeta.name} - ${songMeta.ar.map(a => a.name).join(', ')}.mp3`;
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = fileName;
-            link.click();
+            showProgress(true, 30, "正在下载音频...");
+            if (!songUrl.startsWith('http')) {
+                alert('无法下载该歌曲！API返回内容：' + songUrl);
+                isDownloading = false;
+                showLoading(false);
+                showProgress(false);
+                return;
+            }
+            const musicResponse = await fetch(songUrl);
+            if (!musicResponse.ok) throw new Error('下载歌曲失败');
+            let fakePercent = 30;
+            const fakeUpdate = setInterval(() => {
+                fakePercent += Math.random() * 10;
+                if (fakePercent > 90) fakePercent = 90;
+                showProgress(true, fakePercent, `下载进度：${Math.round(fakePercent)}%`);
+            }, 200);
+            const musicBlob = await musicResponse.blob();
+            clearInterval(fakeUpdate);
+            showProgress(true, 100, "准备保存...");
+            // 写入ID3标签（前端支持）
+            if (typeof ID3Writer !== "undefined" && songInfo) {
+                let coverBuffer = null;
+                if (songInfo.coverUrl) {
+                    try {
+                        const imgResp = await fetch(songInfo.coverUrl);
+                        const imgBlob = await imgResp.blob();
+                        coverBuffer = await imgBlob.arrayBuffer();
+                    } catch (e) {}
+                }
+                const arrayBuffer = await musicBlob.arrayBuffer();
+                const writer = new ID3Writer(new Uint8Array(arrayBuffer));
+                writer.setFrame('TIT2', songInfo.name)
+                    .setFrame('TPE1', [songInfo.artists])
+                    .setFrame('TALB', songInfo.album)
+                    .setFrame('TYER', songInfo.year || '')
+                    .setFrame('TBPM', songInfo.bitrate || '');
+                if (coverBuffer) {
+                    writer.setFrame('APIC', {
+                        type: 3,
+                        data: coverBuffer,
+                        description: 'Cover',
+                        useUnicodeEncoding: false
+                    });
+                }
+                writer.addTag();
+                const taggedBlob = writer.getBlob();
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(taggedBlob);
+                link.download = `${fileName}.mp3`;
+                link.click();
+            } else {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(musicBlob);
+                link.download = `${fileName}.mp3`;
+                link.click();
+            }
             setTimeout(() => showProgress(false), 700);
             isDownloading = false;
             showLoading(false);
         } catch (error) {
-            isDownloading = false;
-            showLoading(false);
-            showProgress(false);
-            alert('下载失败，请检查网络或后端服务！');
+            isDownloading = false; showLoading(false); showProgress(false);
+            alert('下载失败，请检查网络！');
         }
     }
 });
 
-function getNowTimeStr() {
-    const now = new Date();
-    const Y = now.getFullYear();
-    const M = String(now.getMonth() + 1).padStart(2, '0');
-    const D = String(now.getDate()).padStart(2, '0');
-    const h = String(now.getHours()).padStart(2, '0');
-    const m = String(now.getMinutes()).padStart(2, '0');
-    return `${Y}年${M}月${D}日${h}_${m}`;
-}
-
-// 批量下载由 NodeJS 后端实现（前端只发请求，后端打包 zip 并写入标签）
+// 批量下载 ZIP（依然用自建API获取直链）
 document.getElementById('download-btn').addEventListener('click', async () => {
     selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
-
-    if (selectedSongs.length === 0) {
-        alert('请先选择歌曲！');
-        return;
-    }
+    if (!selectedSongs.length) return alert('请先选择歌曲！');
     const quality = document.getElementById('quality-select').value || 'standard';
-    isDownloading = true;
-    showLoading(true);
-    showProgress(true, 0, "准备获取元数据...");
-
+    isDownloading = true; showLoading(true); showProgress(true, 0, "正在准备...");
     try {
-        // 1. 批量获取元数据
-        const ids = selectedSongs.map(song => song.id);
-        // qijieya.cn每次最多100首，可以分批获取
-        let metas = [];
-        for (let i = 0; i < ids.length; i += 100) {
-            const batchIds = ids.slice(i, i + 100);
-            const metaResp = await fetch(`${cloudApi}/song/detail?ids=${batchIds.join(',')}`);
-            const metaJson = await metaResp.json();
-            if (metaJson.songs && metaJson.songs.length) metas.push(...metaJson.songs);
+        const zip = new JSZip();
+        for (let i = 0; i < selectedSongs.length; i++) {
+            const song = selectedSongs[i];
+            const url = `${nodeDownloadApi}?id=${song.id}&level=${quality}`;
+            let songUrl = await fetch(url).then(r => r.text());
+            if (!songUrl.startsWith('http')) continue;
+            let musicBlob = await fetch(songUrl).then(r => r.blob());
+            let coverBuffer = null;
+            if (song.coverUrl) {
+                try {
+                    const imgResp = await fetch(song.coverUrl);
+                    const imgBlob = await imgResp.blob();
+                    coverBuffer = await imgBlob.arrayBuffer();
+                } catch (e) {}
+            }
+            if (typeof ID3Writer !== "undefined") {
+                const arrayBuffer = await musicBlob.arrayBuffer();
+                const writer = new ID3Writer(new Uint8Array(arrayBuffer));
+                writer.setFrame('TIT2', song.name)
+                      .setFrame('TPE1', [song.artists])
+                      .setFrame('TALB', song.album)
+                      .setFrame('TYER', song.year || '')
+                      .setFrame('TBPM', song.bitrate || '');
+                if (coverBuffer) {
+                    writer.setFrame('APIC', {
+                        type: 3,
+                        data: coverBuffer,
+                        description: 'Cover',
+                        useUnicodeEncoding: false
+                    });
+                }
+                writer.addTag();
+                const taggedBlob = writer.getBlob();
+                zip.file(`${song.name} - ${song.artists}.mp3`, taggedBlob);
+            } else {
+                zip.file(`${song.name} - ${song.artists}.mp3`, musicBlob);
+            }
+
+            let percent = Math.round((i + 1) / selectedSongs.length * 100);
+            showProgress(true, percent, `下载进度：${percent}% (${i + 1}/${selectedSongs.length})`);
         }
-
-        showProgress(true, 30, "正在请求后端打包下载...");
-        // 2. POST 到 NodeJS后端服务，返回zip
-        const postData = {
-            ids,
-            quality,
-            metas
-        };
-        const downloadResp = await fetch(nodeDownloadApi, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(postData)
-        });
-        if (!downloadResp.ok) throw new Error('后端打包下载失败');
-
-        showProgress(true, 70, "正在下载zip包...");
-        const zipBlob = await downloadResp.blob();
-        showProgress(true, 100, "下载完成，正在保存...");
+        showProgress(true, 100, "正在打包...");
+        const content = await zip.generateAsync({ type: 'blob' });
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(zipBlob);
+        link.href = URL.createObjectURL(content);
         link.download = `音乐下载_${getNowTimeStr()}.zip`;
         link.click();
         setTimeout(() => showProgress(false), 700);
         isDownloading = false;
         showLoading(false);
     } catch (error) {
-        isDownloading = false;
-        showLoading(false);
-        showProgress(false);
-        alert('批量下载失败，请检查网络或后端服务！');
+        isDownloading = false; showLoading(false); showProgress(false);
+        alert('批量下载失败，请检查网络！');
     }
 });
-
-// ==========
-// 说明：你需要实现 NodeJS 后端接口 /api/download
-// 它需要支持接收POST参数 { ids, quality, metas }，并据此下载音频、写入元数据、打包zip返回
-// 前端已收集好所有元数据，后端写标签可用 node-id3 (MP3)，flac-metadata (FLAC)等
