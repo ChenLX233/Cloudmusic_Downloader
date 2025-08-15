@@ -10,8 +10,10 @@ let isDownloading = false;
 let selectedSongsIds = [];
 let allSongsMap = {};
 
-const apiBase = 'https://api.lxchen.cn/api';
 const cloudApi = 'https://163api.qijieya.cn';
+
+// NodeJS后端服务地址
+const nodeDownloadApi = 'https://api.lxchen.cn/api';
 
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
@@ -334,17 +336,18 @@ document.addEventListener('click', async (e) => {
         }
     }
     if (e.target.closest('.preview-btn')) {
+        // 预览不变
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
         showLoading(true);
         try {
-            const url = `${apiBase}?id=${songId}&level=${quality}`;
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('获取直链失败');
-            let songUrl = await response.text();
+            // 这里预览用前端API或你自己的后端API（如node服务）
+            const url = `${cloudApi}/song/url?id=${songId}&level=${quality}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
             showLoading(false);
-
-            if (!songUrl.startsWith('http')) {
+            const songUrl = data.data?.[0]?.url;
+            if (!songUrl || !songUrl.startsWith('http')) {
                 alert('无法预览该歌曲！API返回内容：' + songUrl);
                 return;
             }
@@ -366,81 +369,47 @@ document.addEventListener('click', async (e) => {
             });
         } catch (error) {
             showLoading(false);
-            console.error('预览失败:', error);
             alert('预览失败，请检查网络！');
             previewDiv.classList.add('hidden');
         }
     }
+    // 单曲下载触发 NodeJS 服务
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
-        const songInfo = allSongsMap[songId];
-        const fileName = songInfo ? `${songInfo.name} - ${songInfo.artists}` : e.target.closest('.download-btn').dataset.name;
         const quality = document.getElementById('quality-select').value || 'standard';
         isDownloading = true;
         showLoading(true);
-        showProgress(true, 0, "正在获取直链...");
-        try {
-            const url = `${apiBase}?id=${songId}&level=${quality}`;
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('获取直链失败');
-            let songUrl = await response.text();
-            showProgress(true, 30, "正在下载音频...");
-            if (!songUrl.startsWith('http')) {
-                alert('无法下载该歌曲！API返回内容：' + songUrl);
-                isDownloading = false;
-                showLoading(false);
-                showProgress(false);
-                return;
-            }
-            const musicResponse = await fetch(songUrl);
-            if (!musicResponse.ok) throw new Error('下载歌曲失败');
-            let fakePercent = 30;
-            const fakeUpdate = setInterval(() => {
-                fakePercent += Math.random() * 10;
-                if (fakePercent > 90) fakePercent = 90;
-                showProgress(true, fakePercent, `下载进度：${Math.round(fakePercent)}%`);
-            }, 200);
-            const musicBlob = await musicResponse.blob();
-            clearInterval(fakeUpdate);
-            showProgress(true, 100, "准备保存...");
+        showProgress(true, 0, "准备获取元数据...");
 
-            // 写入ID3标签
-            if (typeof ID3Writer !== "undefined" && songInfo) {
-                let coverBuffer = null;
-                if (songInfo.coverUrl) {
-                    try {
-                        const imgResp = await fetch(songInfo.coverUrl);
-                        const imgBlob = await imgResp.blob();
-                        coverBuffer = await imgBlob.arrayBuffer();
-                    } catch (e) {}
-                }
-                const arrayBuffer = await musicBlob.arrayBuffer();
-                const writer = new ID3Writer(new Uint8Array(arrayBuffer));
-                writer.setFrame('TIT2', songInfo.name)
-                    .setFrame('TPE1', [songInfo.artists])
-                    .setFrame('TALB', songInfo.album)
-                    .setFrame('TYER', songInfo.year || '')
-                    .setFrame('TBPM', songInfo.bitrate || '');
-                if (coverBuffer) {
-                    writer.setFrame('APIC', {
-                        type: 3,
-                        data: coverBuffer,
-                        description: 'Cover',
-                        useUnicodeEncoding: false
-                    });
-                }
-                writer.addTag();
-                const taggedBlob = writer.getBlob();
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(taggedBlob);
-                link.download = `${fileName}.mp3`;
-                link.click();
-            } else {
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(musicBlob);
-                link.download = `${fileName}.mp3`;
-                link.click();
-            }
+        try {
+            // 从 qijieya.cn 获取元数据
+            const metaResp = await fetch(`${cloudApi}/song/detail?ids=${songId}`);
+            const metaJson = await metaResp.json();
+            if (!metaJson.songs || !metaJson.songs.length) throw new Error('元数据获取失败');
+            const songMeta = metaJson.songs[0];
+
+            showProgress(true, 30, "正在请求后端下载...");
+            // POST 到 NodeJS后端（需你实现 /api/download 接口，返回下载链接或文件）
+            const postData = {
+                id: songId,
+                quality,
+                meta: songMeta
+            };
+            const downloadResp = await fetch(nodeDownloadApi, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(postData)
+            });
+            if (!downloadResp.ok) throw new Error('后端下载失败');
+            const blob = await downloadResp.blob();
+
+            showProgress(true, 100, "下载完成，正在保存...");
+            // 自动下载
+            const fileName = `${songMeta.name} - ${songMeta.ar.map(a => a.name).join(', ')}.mp3`;
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            link.click();
             setTimeout(() => showProgress(false), 700);
             isDownloading = false;
             showLoading(false);
@@ -448,8 +417,7 @@ document.addEventListener('click', async (e) => {
             isDownloading = false;
             showLoading(false);
             showProgress(false);
-            console.error('单曲下载失败:', error);
-            alert('下载失败，请检查网络！');
+            alert('下载失败，请检查网络或后端服务！');
         }
     }
 });
@@ -464,59 +432,7 @@ function getNowTimeStr() {
     return `${Y}年${M}月${D}日${h}_${m}`;
 }
 
-async function batchDownloadZip(songInfos, quality) {
-    const zip = new JSZip();
-    for (let i = 0; i < songInfos.length; i++) {
-        const song = songInfos[i];
-        const url = `${apiBase}?id=${song.id}&level=${quality}`;
-        let songUrl = await fetch(url).then(r => r.text());
-        if (!songUrl.startsWith('http')) continue;
-        let musicBlob = await fetch(songUrl).then(r => r.blob());
-
-        let coverBuffer = null;
-        if (song.coverUrl) {
-            try {
-                const imgResp = await fetch(song.coverUrl);
-                const imgBlob = await imgResp.blob();
-                coverBuffer = await imgBlob.arrayBuffer();
-            } catch (e) {}
-        }
-
-        if (typeof ID3Writer !== "undefined") {
-            const arrayBuffer = await musicBlob.arrayBuffer();
-            const writer = new ID3Writer(new Uint8Array(arrayBuffer));
-            writer.setFrame('TIT2', song.name)
-                  .setFrame('TPE1', [song.artists])
-                  .setFrame('TALB', song.album)
-                  .setFrame('TYER', song.year || '')
-                  .setFrame('TBPM', song.bitrate || '');
-            if (coverBuffer) {
-                writer.setFrame('APIC', {
-                    type: 3,
-                    data: coverBuffer,
-                    description: 'Cover',
-                    useUnicodeEncoding: false
-                });
-            }
-            writer.addTag();
-            const taggedBlob = writer.getBlob();
-            zip.file(`${song.name} - ${song.artists}.mp3`, taggedBlob);
-        } else {
-            zip.file(`${song.name} - ${song.artists}.mp3`, musicBlob);
-        }
-
-        let percent = Math.round((i + 1) / songInfos.length * 100);
-        showProgress(true, percent, `下载进度：${percent}% (${i + 1}/${songInfos.length})`);
-    }
-    showProgress(true, 100, "正在打包...");
-    const content = await zip.generateAsync({ type: 'blob' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(content);
-    link.download = `音乐下载_${getNowTimeStr()}.zip`;
-    link.click();
-    setTimeout(() => showProgress(false), 700);
-}
-
+// 批量下载由 NodeJS 后端实现（前端只发请求，后端打包 zip 并写入标签）
 document.getElementById('download-btn').addEventListener('click', async () => {
     selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
 
@@ -527,17 +443,53 @@ document.getElementById('download-btn').addEventListener('click', async () => {
     const quality = document.getElementById('quality-select').value || 'standard';
     isDownloading = true;
     showLoading(true);
-    showProgress(true, 0, "正在准备...");
+    showProgress(true, 0, "准备获取元数据...");
 
     try {
-        await batchDownloadZip(selectedSongs, quality);
+        // 1. 批量获取元数据
+        const ids = selectedSongs.map(song => song.id);
+        // qijieya.cn每次最多100首，可以分批获取
+        let metas = [];
+        for (let i = 0; i < ids.length; i += 100) {
+            const batchIds = ids.slice(i, i + 100);
+            const metaResp = await fetch(`${cloudApi}/song/detail?ids=${batchIds.join(',')}`);
+            const metaJson = await metaResp.json();
+            if (metaJson.songs && metaJson.songs.length) metas.push(...metaJson.songs);
+        }
+
+        showProgress(true, 30, "正在请求后端打包下载...");
+        // 2. POST 到 NodeJS后端服务，返回zip
+        const postData = {
+            ids,
+            quality,
+            metas
+        };
+        const downloadResp = await fetch(nodeDownloadApi, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(postData)
+        });
+        if (!downloadResp.ok) throw new Error('后端打包下载失败');
+
+        showProgress(true, 70, "正在下载zip包...");
+        const zipBlob = await downloadResp.blob();
+        showProgress(true, 100, "下载完成，正在保存...");
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(zipBlob);
+        link.download = `音乐下载_${getNowTimeStr()}.zip`;
+        link.click();
+        setTimeout(() => showProgress(false), 700);
         isDownloading = false;
         showLoading(false);
-        showProgress(false);
     } catch (error) {
         isDownloading = false;
         showLoading(false);
         showProgress(false);
-        alert('批量下载失败，请检查网络！');
+        alert('批量下载失败，请检查网络或后端服务！');
     }
 });
+
+// ==========
+// 说明：你需要实现 NodeJS 后端接口 /api/download
+// 它需要支持接收POST参数 { ids, quality, metas }，并据此下载音频、写入元数据、打包zip返回
+// 前端已收集好所有元数据，后端写标签可用 node-id3 (MP3)，flac-metadata (FLAC)等
