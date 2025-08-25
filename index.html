@@ -155,14 +155,15 @@
     </footer>
     <script src="script.js"></script>
     <script>
-    // 动态设置背景图片并过滤233端口
+    // 动态设置背景图片（API为json）并过滤233端口
     function fixImgUrl(url) {
         return url ? url.replace('imlazy.ink:233', 'imlazy.ink') : url;
     }
-    fetch('https://api.imlazy.ink/img')
-        .then(response => {
-            document.body.style.backgroundImage = `url(${fixImgUrl(response.url)})`;
-        });
+    fetch('https://api.imlazy.ink/img?json')
+      .then(resp => resp.json())
+      .then(data => {
+        document.body.style.backgroundImage = `url(${fixImgUrl(data.url)})`;
+      });
     </script>
 </body>
 </html>
