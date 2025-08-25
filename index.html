@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>音乐批量下载器 By Enashpinal </title>
+    <title>音乐批量下载器 By Enashpinal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
@@ -81,7 +81,7 @@
         }
     </style>
 </head>
-<body class="font-sans min-h-screen flex flex-col">
+<body class="font-sans min-h-screen flex flex-col" style="background-image: url('https://t.alcy.cc/ycy/');">
     <header class="glass-effect py-6 shadow-lg">
         <div class="container mx-auto px-4">
             <h1 class="text-3xl font-bold text-center">音乐批量下载器</h1>
@@ -154,27 +154,5 @@
         </div>
     </footer>
     <script src="script.js"></script>
-    <script>
-    // 使用新的随机图片API，并自动设置背景
-    fetch('https://t.alcy.cc/ycy/?json')
-      .then(resp => resp.json())
-      .then(data => {
-        let imgUrl = data.url;
-        // 用 <img> 预加载，确保图片可用性
-        let img = new window.Image();
-        img.onload = function() {
-            document.body.style.backgroundImage = `url(${imgUrl})`;
-        };
-        img.onerror = function() {
-            document.body.style.backgroundImage = '';
-            console.warn('背景图片加载失败：', imgUrl);
-        };
-        img.src = imgUrl;
-      })
-      .catch(e => {
-        document.body.style.backgroundImage = '';
-        console.warn('背景API请求失败：', e);
-      });
-    </script>
 </body>
 </html>
