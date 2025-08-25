@@ -155,22 +155,18 @@
     </footer>
     <script src="script.js"></script>
     <script>
-    // 动态设置背景图片（API为json）并过滤233端口
-    function fixImgUrl(url) {
-        return url ? url.replace('imlazy.ink:233', 'imlazy.ink') : url;
-    }
-    fetch('https://api.imlazy.ink/img?json')
+    // 使用新的随机图片API，并自动设置背景
+    fetch('https://t.alcy.cc/ycy/?json')
       .then(resp => resp.json())
       .then(data => {
-        let imgUrl = fixImgUrl(data.url);
-        // 用 <img> 检测图片地址可用性，避免端口问题导致报错
+        let imgUrl = data.url;
+        // 用 <img> 预加载，确保图片可用性
         let img = new window.Image();
         img.onload = function() {
             document.body.style.backgroundImage = `url(${imgUrl})`;
         };
         img.onerror = function() {
             document.body.style.backgroundImage = '';
-            // 可选：显示一条提示信息
             console.warn('背景图片加载失败：', imgUrl);
         };
         img.src = imgUrl;
