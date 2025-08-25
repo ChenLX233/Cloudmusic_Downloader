@@ -14,7 +14,6 @@
         }
         .animate-fadeIn { animation: fadeIn 0.5s ease-in; }
         body {
-            background-image: url('https://api.imlazy.ink/img');
             background-size: cover;
             background-attachment: fixed;
             color: black;
@@ -154,5 +153,15 @@
         </div>
     </footer>
     <script src="script.js"></script>
+    <script>
+    // 动态设置背景图片并过滤233端口
+    function fixImgUrl(url) {
+        return url ? url.replace('imlazy.ink:233', 'imlazy.ink') : url;
+    }
+    fetch('https://api.imlazy.ink/img')
+        .then(response => {
+            document.body.style.backgroundImage = `url(${fixImgUrl(response.url)})`;
+        });
+    </script>
 </body>
 </html>
