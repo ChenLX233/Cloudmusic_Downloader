@@ -17,6 +17,7 @@
             background-size: cover;
             background-attachment: fixed;
             color: black;
+            transition: background-image 0.3s;
         }
         .glass-effect {
             background: rgba(255, 255, 255, 0.6);
@@ -161,8 +162,22 @@
     fetch('https://api.imlazy.ink/img?json')
       .then(resp => resp.json())
       .then(data => {
-        // data.url 是图片真实地址（可能带 :233）
-        document.body.style.backgroundImage = `url(${fixImgUrl(data.url)})`;
+        let imgUrl = fixImgUrl(data.url);
+        // 用 <img> 检测图片地址可用性，避免端口问题导致报错
+        let img = new window.Image();
+        img.onload = function() {
+            document.body.style.backgroundImage = `url(${imgUrl})`;
+        };
+        img.onerror = function() {
+            document.body.style.backgroundImage = '';
+            // 可选：显示一条提示信息
+            console.warn('背景图片加载失败：', imgUrl);
+        };
+        img.src = imgUrl;
+      })
+      .catch(e => {
+        document.body.style.backgroundImage = '';
+        console.warn('背景API请求失败：', e);
       });
     </script>
 </body>
