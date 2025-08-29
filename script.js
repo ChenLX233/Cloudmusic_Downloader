@@ -1,23 +1,30 @@
-const itemsPerPage = 20;
-let currentPage = 1;
-let totalItems = 0;
-let searchType = '1';
-let searchKeywords = '';
-let selectedSongs = [];
-let playlistState = null;
-let currentMode = 'initial';
-let isDownloading = false;
+/**
+ * 音乐批量下载器主脚本
+ * BY Enashpinal
+ * 详细注释，方便维护与二次开发。
+ */
+// === 全局变量区 ===
+const itemsPerPage = 20; // 每页条目数
+let currentPage = 1; // 当前页
+let totalItems = 0; // 总条目数（单曲或歌单）
+let searchType = '1'; // 搜索类型，'1'为单曲，'1000'为歌单
+let searchKeywords = ''; // 搜索关键字
+let selectedSongs = []; // 批量下载选中歌曲列表
+let playlistState = null; // 当前歌单状态
+let currentMode = 'initial'; // 页面当前模式
+let isDownloading = false; // 是否处于下载中
 
-let selectedSongsIds = [];
-let allSongsMap = {}; // id -> song对象
-let selectedPlaylistIds = [];
-let allPlaylistMap = {}; // id -> 歌单对象
-let allSongIdsInPlaylist = []; // 歌单详情页所有歌曲ID
+let selectedSongsIds = []; // 选中歌曲ID列表
+let allSongsMap = {}; // 所有歌曲映射（id -> 歌曲对象）
+let selectedPlaylistIds = []; // 选中歌单ID列表
+let allPlaylistMap = {}; // 所有歌单映射（id -> 歌单对象）
+let allSongIdsInPlaylist = []; // 当前歌单所有歌曲ID（用于全选）
+let lastSongList = []; // 当前页单曲列表缓存
 
-const apiBase = 'https://api.lxchen.cn/api';
-const cloudApi = 'https://163api.qijieya.cn';
-let lastSongList = []; // 保存当前页歌曲列表
+const apiBase = 'https://api.lxchen.cn/api'; // 单曲API
+const cloudApi = 'https://163api.qijieya.cn'; // 云API
 
+// === 进度条显示方法 ===
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
     const pb = document.getElementById('progress-bar');
@@ -33,6 +40,7 @@ function showProgress(show, percent = 0, info = "") {
     }
 }
 
+// === 搜索按钮点击处理 ===
 document.getElementById('search-btn').addEventListener('click', async () => {
     searchType = document.getElementById('search-type').value;
     searchKeywords = document.getElementById('search-input').value.trim();
@@ -40,12 +48,14 @@ document.getElementById('search-btn').addEventListener('click', async () => {
         alert('请输入搜索关键词！');
         return;
     }
+    // 初始化状态
     currentPage = 1;
     selectedSongsIds = [];
     allSongsMap = {};
     selectedPlaylistIds = [];
     allPlaylistMap = {};
     allSongIdsInPlaylist = [];
+    // 歌单ID直接跳转歌单详情
     if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
         currentMode = 'playlist-songs';
         await tryOpenPlaylistById(searchKeywords);
@@ -56,6 +66,7 @@ document.getElementById('search-btn').addEventListener('click', async () => {
     }
 });
 
+// === 页面元素显示/隐藏方法 ===
 function showElements(show) {
     document.getElementById('options').classList.toggle('hidden', !show);
     document.getElementById('search-results').classList.toggle('hidden', !show);
@@ -65,6 +76,7 @@ function showElements(show) {
     document.getElementById('batch-action-header').classList.toggle('hidden', !(show && (currentMode === 'playlist' || currentMode === 'search')));
 }
 
+// === 加载动画显示/隐藏 ===
 function showLoading(show) {
     if (show) {
         document.getElementById('loading').classList.remove('hidden');
@@ -73,6 +85,7 @@ function showLoading(show) {
     }
 }
 
+// === 带重试的fetch方法 ===
 async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     for (let i = 0; i <= retries; i++) {
         const controller = new AbortController();
@@ -95,10 +108,11 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     }
 }
 
-// --- 批量操作按钮渲染 ---
+// === 批量操作按钮区渲染（只剩歌单相关） ===
 function renderBatchActionHeader() {
     const container = document.getElementById('batch-action-header');
     container.innerHTML = '';
+    // 歌单页面批量操作
     if (currentMode === 'playlist') {
         container.innerHTML = `
             <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有歌单</button>
@@ -122,6 +136,7 @@ function renderBatchActionHeader() {
                 });
             }
             showLoading(false);
+            // 反选功能
             if (selectedPlaylistIds.length === allIds.length) {
                 selectedPlaylistIds = [];
             } else {
@@ -146,30 +161,11 @@ function renderBatchActionHeader() {
             displayPlaylists(playlistState.playlists);
         };
     }
-//     if (currentMode === 'search') {
-//         container.innerHTML = `
-//             <button id="select-all-song-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选本页单曲</button>
-//         `;
-//         document.getElementById('select-all-song-btn').onclick = () => {
-//             // 全选本页单曲，不重新请求，只刷新当前列表
-//             const resultsDiv = document.getElementById('search-results');
-//             const songCheckboxes = Array.from(resultsDiv.querySelectorAll('.song-checkbox'));
-//             const pageIds = songCheckboxes.map(cb => cb.dataset.id);
-//             const allPageSelected = pageIds.every(id => selectedSongsIds.includes(id));
-//             if (allPageSelected) {
-//                 selectedSongsIds = selectedSongsIds.filter(id => !pageIds.includes(id));
-//             } else {
-//                 pageIds.forEach(id => {
-//                     if (!selectedSongsIds.includes(id)) selectedSongsIds.push(id);
-//                 });
-//             }
-//             // 只刷新当前页，无需重新searchMusic
-//             displaySongs(lastSongList, 'search-results');
-//         };
-//     }
-//     container.classList.remove('hidden');
-// }
+    // 已删除 currentMode === 'search' 的“全选本页单曲”按钮及事件
+    container.classList.remove('hidden');
+}
 
+// === 搜索主方法（单曲/歌单） ===
 async function searchMusic() {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -179,10 +175,12 @@ async function searchMusic() {
         );
         showLoading(false);
         if (searchType === '1') {
+            // 单曲搜索
             lastSongList = data.result.songs || [];
             displaySongs(lastSongList, 'search-results');
             totalItems = data.result.songCount || 0;
         } else {
+            // 歌单搜索
             playlistState = { playlists: data.result.playlists || [], page: currentPage, keywords: searchKeywords };
             displayPlaylists(data.result.playlists || []);
             totalItems = data.result.playlistCount || 0;
@@ -195,6 +193,7 @@ async function searchMusic() {
     }
 }
 
+// === 跳转歌单详情页方法（根据歌单ID） ===
 async function tryOpenPlaylistById(playlistId) {
     showLoading(true);
     try {
@@ -215,6 +214,7 @@ async function tryOpenPlaylistById(playlistId) {
     }
 }
 
+// === 单曲列表渲染方法 ===
 function displaySongs(songs, containerId) {
     renderBatchActionHeader();
     const resultsDiv = document.getElementById(containerId);
@@ -225,6 +225,7 @@ function displaySongs(songs, containerId) {
     }
     songs.forEach(song => {
         const idStr = String(song.id);
+        // 支持不同接口歌手字段
         const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
         const checked = selectedSongsIds.includes(idStr) ? 'checked' : '';
         const songDiv = document.createElement('div');
@@ -249,8 +250,10 @@ function displaySongs(songs, containerId) {
             </button>
         `;
         resultsDiv.appendChild(songDiv);
+        // 缓存歌曲信息
         allSongsMap[idStr] = { id: idStr, name: song.name + ' - ' + artists };
     });
+    // 选中/取消单曲
     resultsDiv.querySelectorAll('.song-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
             const songId = this.dataset.id;
@@ -263,6 +266,7 @@ function displaySongs(songs, containerId) {
     });
 }
 
+// === 歌单列表渲染方法 ===
 function displayPlaylists(playlists) {
     renderBatchActionHeader();
     allPlaylistMap = {};
@@ -285,6 +289,7 @@ function displayPlaylists(playlists) {
             <img src="${playlist.coverImgUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-5">
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
+        // 点击进入歌单详情
         playlistDiv.addEventListener('click', (event) => {
             if (event.target.closest('input[type="checkbox"]')) return;
             currentMode = 'playlist-songs';
@@ -296,6 +301,7 @@ function displayPlaylists(playlists) {
         });
         resultsDiv.appendChild(playlistDiv);
     });
+    // 歌单复选框事件
     resultsDiv.querySelectorAll('.playlist-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
             const pid = String(this.dataset.id);
@@ -308,6 +314,7 @@ function displayPlaylists(playlists) {
     });
 }
 
+// === 分页渲染方法 ===
 function renderPagination() {
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
@@ -344,6 +351,7 @@ function renderPagination() {
     }
 }
 
+// === 分页切换处理 ===
 function updatePagination() {
     if (currentMode === 'playlist') {
         searchMusic();
@@ -354,6 +362,7 @@ function updatePagination() {
     }
 }
 
+// === 歌单详情页歌曲列表拉取与渲染 ===
 async function openPlaylist(playlistId, playlistName, trackCount) {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -377,7 +386,7 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
     }
 }
 
-// 歌单详情页全选所有歌曲（跨页）
+// === 歌单详情页“全选”按钮（跨页）处理 ===
 async function selectAllHandler() {
     if (!playlistState?.id) return;
     if (!allSongIdsInPlaylist.length) {
@@ -399,6 +408,7 @@ async function selectAllHandler() {
     openPlaylist(playlistState.id, playlistState.name, playlistState.trackCount);
 }
 
+// === 歌单详情页返回按钮处理 ===
 function backHandler() {
     currentMode = 'playlist';
     currentPage = playlistState.page || 1;
@@ -409,12 +419,15 @@ function backHandler() {
     document.getElementById('playlist-details').classList.add('hidden');
 }
 
+// === 单曲操作区点击处理（预览、下载等） ===
 document.addEventListener('click', async (e) => {
     const previewDiv = document.getElementById('preview');
+    // 关闭预览
     if (!e.target.closest('#preview') && !e.target.closest('.preview-btn') && !previewDiv.classList.contains('hidden')) {
         previewDiv.classList.add('hidden');
         previewDiv.innerHTML = '';
     }
+    // 点击歌曲名区域切换选中
     if (e.target.closest('span.cursor-pointer')) {
         const checkbox = e.target.closest('span').parentElement.querySelector('.song-checkbox');
         checkbox.checked = !checkbox.checked;
@@ -425,6 +438,7 @@ document.addEventListener('click', async (e) => {
             selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
         }
     }
+    // 预览按钮
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
@@ -435,11 +449,11 @@ document.addEventListener('click', async (e) => {
             if (!response.ok) throw new Error('获取直链失败');
             let songUrl = await response.text();
             showLoading(false);
-
             if (!songUrl.startsWith('http')) {
                 alert('无法预览该歌曲！API返回内容：' + songUrl);
                 return;
             }
+            // 创建预览弹窗
             previewDiv.classList.remove('hidden');
             previewDiv.style.position = 'fixed';
             previewDiv.style.bottom = '20px';
@@ -462,6 +476,7 @@ document.addEventListener('click', async (e) => {
             previewDiv.classList.add('hidden');
         }
     }
+    // 单曲下载按钮
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
         const fileName = e.target.closest('.download-btn').dataset.name;
@@ -515,6 +530,7 @@ document.addEventListener('click', async (e) => {
     }
 });
 
+// === 获取当前时间字符串（用于打包下载文件名） ===
 function getNowTimeStr() {
     const now = new Date();
     const Y = now.getFullYear();
@@ -525,6 +541,7 @@ function getNowTimeStr() {
     return `${Y}年${M}月${D}日${h}-${m}`;
 }
 
+// === 批量下载选中单曲按钮处理 ===
 document.getElementById('download-btn').addEventListener('click', async () => {
     selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
     if (selectedSongs.length === 0) {
@@ -579,6 +596,7 @@ document.getElementById('download-btn').addEventListener('click', async () => {
     }
 });
 
+// === 批量下载整个歌单并返回zip二进制 ===
 async function batchDownloadPlaylistReturnZip(pid, pname) {
     showProgress(true, 0, `正在获取歌单: ${pname}`);
     let allSongs = [];
