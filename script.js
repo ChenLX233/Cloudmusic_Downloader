@@ -514,15 +514,18 @@ async function downloadSelectedPlaylists() {
         let playlistIdx = 0;
         for (const pid of selectedPlaylistIds) {
             playlistIdx++;
+            // 获取歌单详情
             let detail = await fetchWithRetry(`${cloudApi}/playlist/detail?id=${pid}`);
             let playlistName = detail?.playlist?.name || `歌单_${pid}`;
             let trackCount = detail?.playlist?.trackCount || 0;
             let allSongs = [];
             let perPage = 1000;
+            // 拉取所有歌曲
             for (let i = 0; i < trackCount; i += perPage) {
                 let tracks = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${pid}&limit=${perPage}&offset=${i}`);
                 allSongs = allSongs.concat(tracks.songs);
             }
+            // 创建歌单文件夹
             let folder = zip.folder(playlistName);
             let songIdx = 0;
             for (const song of allSongs) {
@@ -530,6 +533,7 @@ async function downloadSelectedPlaylists() {
                 let id = song.id;
                 let songName = song.name + ' - ' + (song.ar ? song.ar.map(a=>a.name).join(',') : '');
 
+                // 请求音频直链
                 let url = `${apiBase}?id=${id}&level=${quality}`;
                 let songUrl = await fetch(url).then(r => r.text());
                 if (!songUrl.startsWith('http')) continue;
@@ -537,25 +541,22 @@ async function downloadSelectedPlaylists() {
                 const musicResponse = await fetch(songUrl);
                 if (!musicResponse.ok) continue;
 
+                // 自动识别扩展名
                 const disposition = musicResponse.headers.get('Content-Disposition') || '';
                 const mime = musicResponse.headers.get('Content-Type') || '';
                 let ext = 'mp3';
                 if (quality === 'lossless' || quality === 'hires') {
-                    if (/flac/i.test(mime) || /flac/i.test(disposition)) {
-                        ext = 'flac';
-                    } else if (/mp3/i.test(mime) || /mp3/i.test(disposition)) {
-                        ext = 'mp3';
-                    } else if (/m4a|aac/i.test(mime) || /m4a|aac/i.test(disposition)) {
-                        ext = 'm4a';
-                    } else {
-                        ext = 'flac';
-                    }
+                    if (/flac/i.test(mime) || /flac/i.test(disposition)) { ext = 'flac'; }
+                    else if (/mp3/i.test(mime) || /mp3/i.test(disposition)) { ext = 'mp3'; }
+                    else if (/m4a|aac/i.test(mime) || /m4a|aac/i.test(disposition)) { ext = 'm4a'; }
+                    else { ext = 'flac'; }
                 } else {
                     ext = 'mp3';
                 }
                 let filename = `${songName}.${ext}`;
                 folder.file(filename, await musicResponse.blob());
 
+                // 进度显示
                 let percent = Math.round((playlistIdx-1)/totalPlaylists*100 + songIdx/allSongs.length*100/totalPlaylists);
                 let info = `正在打包: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
                 showProgress(true, percent, info);
