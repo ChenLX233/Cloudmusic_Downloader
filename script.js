@@ -564,7 +564,7 @@ async function downloadSelectedPlaylists() {
 
                 // 进度条
                 let percent = Math.round((playlistIdx-1)/totalPlaylists*100 + songIdx/allSongs.length*100/totalPlaylists);
-                let info = `正在压缩: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
+                let info = `正在下载: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
                 showProgress(true, percent, info);
             }
             // 歌单 zip 生成 blob
