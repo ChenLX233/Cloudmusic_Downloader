@@ -508,32 +508,38 @@ async function downloadSelectedPlaylists() {
     isDownloading = true;
     showLoading(true);
     showProgress(true, 0, "正在准备...");
+
+    function safeName(name) {
+        return name.replace(/[\\/:*?"<>|]/g, '_');
+    }
+
     try {
-        const zip = new JSZip();
+        const masterZip = new JSZip();
         let totalPlaylists = selectedPlaylistIds.length;
         let playlistIdx = 0;
+
         for (const pid of selectedPlaylistIds) {
             playlistIdx++;
-            // 获取歌单详情
+            // 歌单详情与歌曲列表
             let detail = await fetchWithRetry(`${cloudApi}/playlist/detail?id=${pid}`);
             let playlistName = detail?.playlist?.name || `歌单_${pid}`;
             let trackCount = detail?.playlist?.trackCount || 0;
             let allSongs = [];
             let perPage = 1000;
-            // 拉取所有歌曲
             for (let i = 0; i < trackCount; i += perPage) {
                 let tracks = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${pid}&limit=${perPage}&offset=${i}`);
                 allSongs = allSongs.concat(tracks.songs);
             }
-            // 创建歌单文件夹
-            let folder = zip.folder(playlistName);
+
+            // 歌单内部 zip
+            let playlistZip = new JSZip();
             let songIdx = 0;
             for (const song of allSongs) {
                 songIdx++;
                 let id = song.id;
                 let songName = song.name + ' - ' + (song.ar ? song.ar.map(a=>a.name).join(',') : '');
 
-                // 请求音频直链
+                // 音频直链
                 let url = `${apiBase}?id=${id}&level=${quality}`;
                 let songUrl = await fetch(url).then(r => r.text());
                 if (!songUrl.startsWith('http')) continue;
@@ -541,7 +547,7 @@ async function downloadSelectedPlaylists() {
                 const musicResponse = await fetch(songUrl);
                 if (!musicResponse.ok) continue;
 
-                // 自动识别扩展名
+                // 扩展名判断
                 const disposition = musicResponse.headers.get('Content-Disposition') || '';
                 const mime = musicResponse.headers.get('Content-Type') || '';
                 let ext = 'mp3';
@@ -553,19 +559,23 @@ async function downloadSelectedPlaylists() {
                 } else {
                     ext = 'mp3';
                 }
-                let filename = `${songName}.${ext}`;
-                folder.file(filename, await musicResponse.blob());
+                let filename = safeName(songName) + '.' + ext;
+                playlistZip.file(filename, await musicResponse.blob());
 
-                // 进度显示
+                // 进度条
                 let percent = Math.round((playlistIdx-1)/totalPlaylists*100 + songIdx/allSongs.length*100/totalPlaylists);
-                let info = `正在打包: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
+                let info = `正在压缩: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
                 showProgress(true, percent, info);
             }
+            // 歌单 zip 生成 blob
+            let playlistZipBlob = await playlistZip.generateAsync({type: 'blob'});
+            // master zip 里加此歌单 zip
+            masterZip.file(safeName(playlistName) + '.zip', playlistZipBlob);
         }
-        showProgress(true, 100, "正在生成ZIP包...");
-        const content = await zip.generateAsync({type:'blob'});
+        showProgress(true, 100, "正在生成总ZIP包...");
+        const masterZipBlob = await masterZip.generateAsync({type:'blob'});
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
+        link.href = URL.createObjectURL(masterZipBlob);
         link.download = `歌单打包_${getNowTimeStr()}.zip`;
         link.click();
         isDownloading = false;
