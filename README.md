@@ -5,7 +5,9 @@
 
 需要完整教程请加issue
 
-## https://mscdownload.pages.dev 
+## https://neteasedown.pages.dev/ [此为本修改版本]
+
+## https://mscdownload.pages.dev [原版]
 -对接网易云音乐API，支持关键词/ID搜索歌单、选择音质以及批量下载。
 
 -目前支持的音质有： 标准、较高、极高、无损、Hi-Res、高清环绕声、杜比全景声、超清母带
@@ -16,7 +18,6 @@
 
 -切换到歌单搜索，输入歌单ID再搜可以直接跳转该歌单。
 
-## https://neteasedown.pages.dev/ [此为修改版本]
 
 # 免责声明
 
