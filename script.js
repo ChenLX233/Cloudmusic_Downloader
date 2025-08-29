@@ -2,6 +2,11 @@
  * 音乐批量下载器主脚本（支持下载选中歌单，按钮功能随模式切换）
  * BY Enashpinal 
  * 详细注释覆盖所有核心功能与交互逻辑。
+ * 
+ * 下载相关逻辑已升级：
+ * - 文件名始终采用“歌名 - 歌手名”，而不是后端filename或自定义名。
+ * - 非无损/hires音质全部保存为mp3扩展名，无损/hires按后端类型（优先flac）。
+ * - 其它功能（搜索、歌单、分页、全选、预览等）全部原样保留。
  */
 
 // =======================
@@ -31,9 +36,6 @@ const cloudApi = 'https://163api.qijieya.cn';      // 云API
 // 2. UI显示/动画相关方法
 // =======================
 
-/**
- * 控制进度条弹窗显示、进度与说明
- */
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
     const pb = document.getElementById('progress-bar');
@@ -49,13 +51,9 @@ function showProgress(show, percent = 0, info = "") {
     }
 }
 
-/**
- * 页面各区域显示/隐藏，下载按钮内容与功能随模式切换
- */
 function showElements(show) {
     const optionsDiv = document.getElementById('options');
     const downloadBtn = document.getElementById('download-btn');
-    // 切换下载按钮文本和功能
     if (show && currentMode === 'playlist') {
         optionsDiv.classList.remove('hidden');
         downloadBtn.textContent = '下载所选歌单';
@@ -75,9 +73,6 @@ function showElements(show) {
     document.getElementById('batch-action-header').classList.toggle('hidden', !(show && (currentMode === 'playlist' || currentMode === 'search')));
 }
 
-/**
- * 显示/隐藏加载动画（遮罩）
- */
 function showLoading(show) {
     if (show) {
         document.getElementById('loading').classList.remove('hidden');
@@ -88,11 +83,6 @@ function showLoading(show) {
 
 /**
  * 支持超时和重试的 fetch 封装
- * @param {string} url
- * @param {object} options
- * @param {number} retries
- * @param {number} timeout
- * @returns {Promise<object>}
  */
 async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     for (let i = 0; i <= retries; i++) {
@@ -120,9 +110,6 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
 // 3. 搜索与批量操作按钮渲染
 // =======================
 
-/**
- * 批量操作按钮渲染，仅歌单页面有批量选择相关按钮
- */
 function renderBatchActionHeader() {
     const container = document.getElementById('batch-action-header');
     container.innerHTML = '';
@@ -131,7 +118,6 @@ function renderBatchActionHeader() {
             <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有歌单</button>
             <button id="select-page-playlist-btn" class="p-2 bg-indigo-500 hover-effect rounded text-white">全选本页歌单</button>
         `;
-        // 全选所有歌单（跨页）
         document.getElementById('select-all-playlist-btn').onclick = async () => {
             let allIds = [];
             let fullPlaylistMap = {};
@@ -157,7 +143,6 @@ function renderBatchActionHeader() {
             allPlaylistMap = fullPlaylistMap;
             displayPlaylists(playlistState.playlists);
         };
-        // 全选本页歌单
         document.getElementById('select-page-playlist-btn').onclick = () => {
             const resultsDiv = document.getElementById('search-results');
             const playlistCheckboxes = Array.from(resultsDiv.querySelectorAll('.playlist-checkbox'));
@@ -177,12 +162,9 @@ function renderBatchActionHeader() {
 }
 
 // =======================
-// 4. 搜索逻辑与列表展示
+// 4. 搜索逻辑与列表展示与分页
 // =======================
 
-/**
- * 搜索按钮点击事件：初始化状态并触发搜索或歌单详情跳转
- */
 document.getElementById('search-btn').addEventListener('click', async () => {
     searchType = document.getElementById('search-type').value;
     searchKeywords = document.getElementById('search-input').value.trim();
@@ -206,9 +188,6 @@ document.getElementById('search-btn').addEventListener('click', async () => {
     }
 });
 
-/**
- * 搜索主方法，分别处理单曲/歌单模式
- */
 async function searchMusic() {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -235,9 +214,6 @@ async function searchMusic() {
     }
 }
 
-/**
- * 打开歌单详情页（通过歌单ID），失败时返回歌单列表
- */
 async function tryOpenPlaylistById(playlistId) {
     showLoading(true);
     try {
@@ -258,9 +234,6 @@ async function tryOpenPlaylistById(playlistId) {
     }
 }
 
-/**
- * 渲染单曲列表
- */
 function displaySongs(songs, containerId) {
     renderBatchActionHeader();
     const resultsDiv = document.getElementById(containerId);
@@ -309,9 +282,6 @@ function displaySongs(songs, containerId) {
     });
 }
 
-/**
- * 渲染歌单列表
- */
 function displayPlaylists(playlists) {
     renderBatchActionHeader();
     allPlaylistMap = {};
@@ -357,9 +327,6 @@ function displayPlaylists(playlists) {
     });
 }
 
-/**
- * 分页导航区渲染
- */
 function renderPagination() {
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
@@ -396,9 +363,6 @@ function renderPagination() {
     }
 }
 
-/**
- * 分页切换时刷新内容
- */
 function updatePagination() {
     if (currentMode === 'playlist') {
         searchMusic();
@@ -409,9 +373,6 @@ function updatePagination() {
     }
 }
 
-/**
- * 歌单详情页拉取所有歌曲并渲染
- */
 async function openPlaylist(playlistId, playlistName, trackCount) {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -435,9 +396,6 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
     }
 }
 
-/**
- * 歌单详情页全选所有歌曲（跨页）
- */
 async function selectAllHandler() {
     if (!playlistState?.id) return;
     if (!allSongIdsInPlaylist.length) {
@@ -459,9 +417,6 @@ async function selectAllHandler() {
     openPlaylist(playlistState.id, playlistState.name, playlistState.trackCount);
 }
 
-/**
- * 歌单详情页返回按钮处理
- */
 function backHandler() {
     currentMode = 'playlist';
     currentPage = playlistState.page || 1;
@@ -473,13 +428,9 @@ function backHandler() {
 }
 
 // =======================
-// 5. 单曲/歌单下载/预览相关
+// 5. 下载相关（已升级文件名/格式自动处理）
 // =======================
 
-/**
- * 下载所选单曲（单曲页面和歌单详情页）
- * 自动识别后端实际返回的文件名/扩展名
- */
 async function downloadSelectedSongs() {
     selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
     if (selectedSongs.length === 0) {
@@ -496,39 +447,32 @@ async function downloadSelectedSongs() {
         let startTime = Date.now();
         for (let i = 0; i < total; i++) {
             const song = selectedSongs[i];
-            // 请求后端 API 获取真实直链
             const url = `${apiBase}?id=${song.id}&level=${quality}`;
             let songUrl = await fetch(url).then(r => r.text());
             if (!songUrl.startsWith('http')) continue;
 
-            // 请求后端直链，获取真实音频文件及头部
             const musicResponse = await fetch(songUrl);
             if (!musicResponse.ok) continue;
 
-            // 解析 Content-Disposition 以及 Content-Type
             const disposition = musicResponse.headers.get('Content-Disposition') || '';
+            const mime = musicResponse.headers.get('Content-Type') || '';
             let ext = 'mp3';
-            let filename = song.name;
-            const filenameMatch = /filename="?([^"]+)"?/.exec(disposition);
-            if (filenameMatch) {
-                filename = filenameMatch[1];
-                ext = filename.split('.').pop().toLowerCase();
+            if (quality === 'lossless' || quality === 'hires') {
+                if (/flac/i.test(mime) || /flac/i.test(disposition)) {
+                    ext = 'flac';
+                } else if (/mp3/i.test(mime) || /mp3/i.test(disposition)) {
+                    ext = 'mp3';
+                } else if (/m4a|aac/i.test(mime) || /m4a|aac/i.test(disposition)) {
+                    ext = 'm4a';
+                } else {
+                    ext = 'flac';
+                }
             } else {
-                // 没有 filename 时用 MIME 类型推断后缀
-                const mime = musicResponse.headers.get('Content-Type') || '';
-                if (mime.includes('flac')) ext = 'flac';
-                else if (mime.includes('mp3')) ext = 'mp3';
-                else if (mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
-                else ext = 'mp3';
-                filename = `${song.name}.${ext}`;
+                ext = 'mp3';
             }
+            let filename = `${song.name}.${ext}`;
+            zip.file(filename, await musicResponse.blob());
 
-            // 获取音频 Blob
-            const musicBlob = await musicResponse.blob();
-            // 加入 ZIP 包
-            zip.file(filename, musicBlob);
-
-            // 进度显示
             let percent = Math.round((i + 1) / total * 100);
             let elapsed = (Date.now() - startTime) / 1000;
             let avg = elapsed / (i + 1);
@@ -539,7 +483,6 @@ async function downloadSelectedSongs() {
             showProgress(true, percent, info);
         }
         showProgress(true, 100, "正在打包...");
-        // 生成 ZIP 并下载
         const content = await zip.generateAsync({ type: 'blob' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
@@ -556,10 +499,6 @@ async function downloadSelectedSongs() {
     }
 }
 
-/**
- * 下载所选歌单（歌单页面），每个歌单打包为一个文件夹
- * 自动识别后端实际返回的文件名/扩展名
- */
 async function downloadSelectedPlaylists() {
     if (!selectedPlaylistIds.length) {
         alert('请先选择歌单！');
@@ -591,38 +530,32 @@ async function downloadSelectedPlaylists() {
                 let id = song.id;
                 let songName = song.name + ' - ' + (song.ar ? song.ar.map(a=>a.name).join(',') : '');
 
-                // 请求后端 API 获取真实直链
                 let url = `${apiBase}?id=${id}&level=${quality}`;
                 let songUrl = await fetch(url).then(r => r.text());
                 if (!songUrl.startsWith('http')) continue;
 
-                // 请求后端直链，获取真实音频文件及头部
                 const musicResponse = await fetch(songUrl);
                 if (!musicResponse.ok) continue;
 
-                // 解析 Content-Disposition 以及 Content-Type
                 const disposition = musicResponse.headers.get('Content-Disposition') || '';
+                const mime = musicResponse.headers.get('Content-Type') || '';
                 let ext = 'mp3';
-                let filename = songName;
-                const filenameMatch = /filename="?([^"]+)"?/.exec(disposition);
-                if (filenameMatch) {
-                    filename = filenameMatch[1];
-                    ext = filename.split('.').pop().toLowerCase();
+                if (quality === 'lossless' || quality === 'hires') {
+                    if (/flac/i.test(mime) || /flac/i.test(disposition)) {
+                        ext = 'flac';
+                    } else if (/mp3/i.test(mime) || /mp3/i.test(disposition)) {
+                        ext = 'mp3';
+                    } else if (/m4a|aac/i.test(mime) || /m4a|aac/i.test(disposition)) {
+                        ext = 'm4a';
+                    } else {
+                        ext = 'flac';
+                    }
                 } else {
-                    const mime = musicResponse.headers.get('Content-Type') || '';
-                    if (mime.includes('flac')) ext = 'flac';
-                    else if (mime.includes('mp3')) ext = 'mp3';
-                    else if (mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
-                    else ext = 'mp3';
-                    filename = `${songName}.${ext}`;
+                    ext = 'mp3';
                 }
+                let filename = `${songName}.${ext}`;
+                folder.file(filename, await musicResponse.blob());
 
-                // 获取音频 Blob
-                const musicBlob = await musicResponse.blob();
-                // 加入 ZIP 文件夹
-                folder.file(filename, musicBlob);
-
-                // 进度显示
                 let percent = Math.round((playlistIdx-1)/totalPlaylists*100 + songIdx/allSongs.length*100/totalPlaylists);
                 let info = `正在打包: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
                 showProgress(true, percent, info);
@@ -645,9 +578,10 @@ async function downloadSelectedPlaylists() {
     }
 }
 
-/**
- * 页面点击事件委托，处理预览/下载/复选框切换等
- */
+// =======================
+// 6. 事件委托（预览/下载/复选框/返回）
+// =======================
+
 document.addEventListener('click', async (e) => {
     const previewDiv = document.getElementById('preview');
     // 关闭预览弹窗
@@ -706,7 +640,7 @@ document.addEventListener('click', async (e) => {
     // 单曲下载按钮（每首右侧的小下载按钮，不是批量下载）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
-        const fileName = e.target.closest('.download-btn').dataset.name;
+        const fileNameOrigin = e.target.closest('.download-btn').dataset.name; // “歌名 - 歌手名”
         const quality = document.getElementById('quality-select').value || 'standard';
         isDownloading = true;
         showLoading(true);
@@ -726,25 +660,23 @@ document.addEventListener('click', async (e) => {
             }
             const musicResponse = await fetch(songUrl);
             if (!musicResponse.ok) throw new Error('下载歌曲失败');
-
-            // 新增：获取后端真实文件名和类型
             const disposition = musicResponse.headers.get('Content-Disposition') || '';
+            const mime = musicResponse.headers.get('Content-Type') || '';
             let ext = 'mp3';
-            let filename = fileName;
-            // 解析扩展名
-            const filenameMatch = /filename="?([^"]+)"?/.exec(disposition);
-            if (filenameMatch) {
-                filename = filenameMatch[1];
-                ext = filename.split('.').pop().toLowerCase();
+            if (quality === 'lossless' || quality === 'hires') {
+                if (/flac/i.test(mime) || /flac/i.test(disposition)) {
+                    ext = 'flac';
+                } else if (/mp3/i.test(mime) || /mp3/i.test(disposition)) {
+                    ext = 'mp3';
+                } else if (/m4a|aac/i.test(mime) || /m4a|aac/i.test(disposition)) {
+                    ext = 'm4a';
+                } else {
+                    ext = 'flac';
+                }
             } else {
-                // 没有filename就用MIME类型
-                const mime = musicResponse.headers.get('Content-Type') || '';
-                if (mime.includes('flac')) ext = 'flac';
-                else if (mime.includes('mp3')) ext = 'mp3';
-                else if (mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
-                else ext = 'mp3';
-                filename = `${fileName}.${ext}`;
+                ext = 'mp3';
             }
+            let filename = `${fileNameOrigin}.${ext}`;
 
             let fakePercent = 30;
             const fakeUpdate = setInterval(() => {
@@ -771,9 +703,10 @@ document.addEventListener('click', async (e) => {
     }
 });
 
-/**
- * 获取当前时间字符串（用于zip包名）
- */
+// =======================
+// 7. 工具函数
+// =======================
+
 function getNowTimeStr() {
     const now = new Date();
     const Y = now.getFullYear();
