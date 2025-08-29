@@ -4,34 +4,47 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>音乐批量下载器 By Enashpinal</title>
+    <!-- 引入 TailwindCSS（原子样式库，用于快速页面布局和响应式设计） -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 JSZip（前端生成 zip 文件用） -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
+        /* ==============================
+           动画与页面样式详细注释区
+        ===============================*/
+
+        /* fadeIn 动画：用于元素淡入显示 */
         @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from { opacity: 0; }  /* 动画起始：完全透明 */
+            to { opacity: 1; }    /* 动画结束：完全不透明 */
         }
+        /* animate-fadeIn 类：应用 fadeIn 动画，0.5秒渐入 */
         .animate-fadeIn { animation: fadeIn 0.5s ease-in; }
+
+        /* 页面背景与基础色彩设置 */
         body {
-            background-size: cover;
-            background-attachment: fixed;
-            color: black;
-            transition: background-image 0.3s;
+            background-size: cover;               /* 背景图片自动填充整个页面 */
+            background-attachment: fixed;         /* 背景图片固定不随滚动移动 */
+            color: black;                         /* 主文本颜色黑色 */
+            transition: background-image 0.3s;    /* 切换背景图片时平滑过渡 */
         }
+        /* glass-effect 类：毛玻璃效果，常用于容器、卡片、弹窗 */
         .glass-effect {
-            background: rgba(255, 255, 255, 0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.6);            /* 半透明白背景 */
+            backdrop-filter: blur(10px);                     /* 背景模糊处理 */
+            border: 1px solid rgba(255, 255, 255, 0.3);      /* 淡白色边框 */
+            border-radius: 16px;                             /* 圆角 */
         }
+        /* hover-effect 类：鼠标悬停时的放大和去除模糊效果 */
         .hover-effect {
-            transition: backdrop-filter 0.2s ease, transform 0.2s ease;
+            transition: backdrop-filter 0.2s ease, transform 0.2s ease; /* 动画过渡 */
         }
         .hover-effect:hover {
-            backdrop-filter: none;
-            transform: scale(1.05);
+            backdrop-filter: none;        /* 悬停时去除模糊 */
+            transform: scale(1.05);       /* 悬停时放大 5% */
         }
+        /* 所有按钮、选择框、输入框统一圆角、边框与背景 */
         button, select, input {
             border-radius: 8px;
             border: 1px solid rgba(0, 0, 0, 0.2);
@@ -39,10 +52,12 @@
             color: black;
         }
         input::placeholder { color: rgba(0, 0, 0, 0.6); }
+        /* 头部和页脚统一毛玻璃背景 */
         header, footer {
             background: rgba(255, 255, 255, 0.5);
             backdrop-filter: blur(10px);
         }
+        /* 音质选择标签专用样式（毛玻璃+圆角+内边距） */
         .quality-label-bg {
             background: rgba(255, 255, 255, 0.6);
             backdrop-filter: blur(10px);
@@ -50,6 +65,7 @@
             border-radius: 8px;
             padding: 8px 12px;
         }
+        /* 下载进度条弹窗样式（居中固定） */
         #progress-container {
             position: fixed;
             top: 60%;
@@ -58,6 +74,7 @@
             z-index: 1001;
             width: 320px;
         }
+        /* 进度条背景条样式 */
         #progress-bar-bg {
             width: 100%;
             height: 22px;
@@ -67,13 +84,15 @@
             margin-bottom: 8px;
             border: 1px solid #bcbcbc;
         }
+        /* 进度条填充区样式（渐变色+圆角） */
         #progress-bar {
             height: 100%;
             background: linear-gradient(90deg, #38bdf8 0%, #22d3ee 100%);
             border-radius: 12px;
-            transition: width 0.2s;
+            transition: width 0.2s; /* 进度变动时平滑过渡 */
             width: 0%;
         }
+        /* 进度条文字说明样式 */
         #progress-info {
             text-align: center;
             font-size: 1rem;
@@ -82,15 +101,19 @@
     </style>
 </head>
 <body class="font-sans min-h-screen flex flex-col" style="background-image: url('https://t.alcy.cc/ycy/');">
+    <!-- ==== 头部区域：标题与搜索 ==== -->
     <header class="glass-effect py-6 shadow-lg">
         <div class="container mx-auto px-4">
             <h1 class="text-3xl font-bold text-center">音乐批量下载器</h1>
             <div class="flex justify-center mt-4 gap-2">
+                <!-- 搜索类型选择：单曲或歌单 -->
                 <select id="search-type" class="p-2 bg-transparent glass-effect">
                     <option value="1">单曲</option>
                     <option value="1000">歌单</option>
                 </select>
+                <!-- 搜索输入框：支持关键词或歌单ID -->
                 <input type="text" id="search-input" placeholder="输入关键词以搜索  或输入歌单ID直接跳转" class="p-2 w-96 bg-transparent glass-effect">
+                <!-- 搜索按钮，点击触发搜索 -->
                 <button id="search-btn" class="p-2 bg-blue-500 hover-effect">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -100,6 +123,7 @@
         </div>
     </header>
     <main class="container mx-auto px-4 py-6 flex-grow">
+        <!-- ==== 选项区：音质选择与批量下载按钮 ==== -->
         <div id="options" class="flex justify-between mb-4 hidden">
             <div class="flex items-center">
                 <label for="quality-select" class="mr-2 self-center quality-label-bg">音质选择：</label>
@@ -111,6 +135,7 @@
                     <option value="hires">Hi-Res</option>
                 </select>
             </div>
+            <!-- 批量下载所选单曲的按钮 -->
             <button id="download-btn" class="p-2 bg-green-500 hover-effect">
                 <svg class="w-5 h-5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
@@ -118,41 +143,54 @@
                 下载所选单曲
             </button>
         </div>
+        <!-- ==== 加载动画遮罩（数据请求时显示，居中弹出） ==== -->
         <div id="loading" class="text-center hidden glass-effect" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 10px; z-index: 999;">加载中...</div>
+        <!-- ==== 下载进度条弹窗（下载/打包过程反馈） ==== -->
         <div id="progress-container" class="hidden glass-effect">
             <div id="progress-bar-bg">
                 <div id="progress-bar"></div>
             </div>
             <div id="progress-info">正在下载...</div>
         </div>
+        <!-- ==== 批量操作按钮区（按钮由 JS 动态生成，无“全选本页单曲”按钮） ==== -->
         <div id="batch-action-header" class="mb-4 flex gap-2 hidden"></div>
+        <!-- ==== 歌单详情弹窗（显示歌单名、全选/返回按钮） ==== -->
         <div id="playlist-details" class="glass-effect p-4 mt-4 hidden animate-fadeIn">
             <div class="flex justify-between items-center mb-4">
                 <div class="flex items-center">
+                    <!-- 返回歌单列表按钮 -->
                     <button id="back-btn" class="p-2 bg-gray-500 hover-effect mr-2">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                         </svg>
                     </button>
+                    <!-- 歌单标题展示 -->
                     <h2 id="playlist-title" class="text-xl font-bold"></h2>
                 </div>
+                <!-- 歌单详情页全选所有歌曲按钮 -->
                 <button id="select-all-btn" class="p-2 bg-blue-500 hover-effect">全选</button>
             </div>
         </div>
+        <!-- ==== 搜索结果区（动态渲染单曲/歌单列表） ==== -->
         <div id="search-results" class="glass-effect p-4 hidden animate-fadeIn"></div>
+        <!-- ==== 分页导航区 ==== -->
         <div id="pagination" class="flex justify-center gap-2 mt-4 hidden"></div>
+        <!-- ==== 单曲预览弹窗（播放音频） ==== -->
         <div id="preview" class="glass-effect p-4 hidden z-50 fixed"></div>
     </main>
+    <!-- ==== 页脚区域，包含版权声明与免责声明 ==== -->
     <footer class="glass-effect py-4 w-full" id="footer">
         <div class="container mx-auto px-4 text-center">
             <p>
                 BY  
                 <a href="https://enashpinal.pages.dev" class="underline hover:text-blue-500">Enashpinal</a>
                 <br>
+                <!-- 版权及免责声明说明，禁止商业传播，鼓励正版音乐 -->
                 本页面为开源项目部署实例，仅供个人研究、学习或技术演示用途，不得用于商业传播或公开分发。本工具不存储、分发或传播任何受版权保护的音乐内容。用户使用本工具下载、缓存或分享任何音乐资源时，应自行确保符合相关法律法规及版权规定。由于用户使用本工具导致的任何版权纠纷或法律责任，均由用户本人承担，开发者不承担任何责任。开发者强烈建议用户尊重音乐版权，支持正版音乐。如有任何侵权或违法行为，开发者有权随时停止本项目的维护与发布。
             </p>
         </div>
     </footer>
+    <!-- ==== 主逻辑脚本文件，建议配合最新版 script.js 使用 ==== -->
     <script src="script.js"></script>
 </body>
 </html>
