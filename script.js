@@ -1,72 +1,78 @@
 /**
- * 音乐批量下载器主脚本
+ * 音乐批量下载器主脚本（已彻底去除“全选本页单曲”按钮）
  * BY Enashpinal
- * 详细注释，方便维护与二次开发。
+ * 已加入非常详细的中文注释，便于理解和维护。
  */
-// === 全局变量区 ===
-const itemsPerPage = 20; // 每页条目数
-let currentPage = 1; // 当前页
-let totalItems = 0; // 总条目数（单曲或歌单）
-let searchType = '1'; // 搜索类型，'1'为单曲，'1000'为歌单
-let searchKeywords = ''; // 搜索关键字
-let selectedSongs = []; // 批量下载选中歌曲列表
-let playlistState = null; // 当前歌单状态
-let currentMode = 'initial'; // 页面当前模式
-let isDownloading = false; // 是否处于下载中
 
-let selectedSongsIds = []; // 选中歌曲ID列表
-let allSongsMap = {}; // 所有歌曲映射（id -> 歌曲对象）
-let selectedPlaylistIds = []; // 选中歌单ID列表
-let allPlaylistMap = {}; // 所有歌单映射（id -> 歌单对象）
-let allSongIdsInPlaylist = []; // 当前歌单所有歌曲ID（用于全选）
-let lastSongList = []; // 当前页单曲列表缓存
+/* ==============================
+   1. 全局变量区
+   ============================== */
+// 每页显示条目数（歌单/单曲分页用）
+const itemsPerPage = 20;
+// 当前分页页码
+let currentPage = 1;
+// 搜索到的总条目数（当前分页用）
+let totalItems = 0;
+// 搜索类型 '1'表示单曲，'1000'表示歌单
+let searchType = '1';
+// 用户输入的搜索关键词
+let searchKeywords = '';
+// 批量下载时选中的歌曲对象列表
+let selectedSongs = [];
+// 当前歌单相关状态信息（如ID、名称、歌曲总数、页码等）
+let playlistState = null;
+// 页面当前模式（'search'、'playlist'、'playlist-songs'等）
+let currentMode = 'initial';
+// 是否正在下载（用于防止操作冲突）
+let isDownloading = false;
 
-const apiBase = 'https://api.lxchen.cn/api'; // 单曲API
-const cloudApi = 'https://163api.qijieya.cn'; // 云API
+// 选中的歌曲ID列表（用于多选/批量下载）
+let selectedSongsIds = [];
+// 所有当前页歌曲对象的映射表（id -> 歌曲对象）
+let allSongsMap = {};
+// 选中的歌单ID列表（用于多选/批量下载歌单）
+let selectedPlaylistIds = [];
+// 所有当前页歌单对象的映射表（id -> 歌单对象）
+let allPlaylistMap = {};
+// 当前歌单详情页全部歌曲ID（用于歌单全选）
+let allSongIdsInPlaylist = [];
+// 当前页的歌曲列表缓存（用于刷新视图时避免重复请求）
+let lastSongList = [];
 
-// === 进度条显示方法 ===
+// API接口基础地址（单曲下载和预览用）
+const apiBase = 'https://api.lxchen.cn/api';
+// 云API地址（搜索/歌单相关操作用）
+const cloudApi = 'https://163api.qijieya.cn';
+
+/* ==============================
+   2. 页面状态与交互方法
+   ============================== */
+
+/**
+ * 显示或隐藏下载进度条，控制进度百分比和说明文本
+ * @param {boolean} show - 是否显示进度条
+ * @param {number} percent - 当前进度百分比（0-100）
+ * @param {string} info - 进度相关说明文本
+ */
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
     const pb = document.getElementById('progress-bar');
     const pi = document.getElementById('progress-info');
     if (show) {
-        pc.classList.remove('hidden');
-        pb.style.width = percent + "%";
-        pi.textContent = info;
+        pc.classList.remove('hidden');        // 显示进度条容器
+        pb.style.width = percent + "%";       // 设置进度条长度
+        pi.textContent = info;                // 设置进度说明文本
     } else {
-        pc.classList.add('hidden');
+        pc.classList.add('hidden');           // 隐藏进度条容器
         pb.style.width = "0%";
-        pi.textContent = "正在下载...";
+        pi.textContent = "正在下载...";       // 默认说明
     }
 }
 
-// === 搜索按钮点击处理 ===
-document.getElementById('search-btn').addEventListener('click', async () => {
-    searchType = document.getElementById('search-type').value;
-    searchKeywords = document.getElementById('search-input').value.trim();
-    if (!searchKeywords) {
-        alert('请输入搜索关键词！');
-        return;
-    }
-    // 初始化状态
-    currentPage = 1;
-    selectedSongsIds = [];
-    allSongsMap = {};
-    selectedPlaylistIds = [];
-    allPlaylistMap = {};
-    allSongIdsInPlaylist = [];
-    // 歌单ID直接跳转歌单详情
-    if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
-        currentMode = 'playlist-songs';
-        await tryOpenPlaylistById(searchKeywords);
-    } else {
-        currentMode = searchType === '1' ? 'search' : 'playlist';
-        showElements(true);
-        searchMusic();
-    }
-});
-
-// === 页面元素显示/隐藏方法 ===
+/**
+ * 显示或隐藏页面各个区域（如选项区、结果区、分页、歌单详情区等）
+ * @param {boolean} show - 是否显示相关区域
+ */
 function showElements(show) {
     document.getElementById('options').classList.toggle('hidden', !show);
     document.getElementById('search-results').classList.toggle('hidden', !show);
@@ -76,7 +82,10 @@ function showElements(show) {
     document.getElementById('batch-action-header').classList.toggle('hidden', !(show && (currentMode === 'playlist' || currentMode === 'search')));
 }
 
-// === 加载动画显示/隐藏 ===
+/**
+ * 显示或隐藏加载中的动画（如遮罩/提示）
+ * @param {boolean} show - 是否显示加载动画
+ */
 function showLoading(show) {
     if (show) {
         document.getElementById('loading').classList.remove('hidden');
@@ -85,7 +94,14 @@ function showLoading(show) {
     }
 }
 
-// === 带重试的fetch方法 ===
+/**
+ * 支持超时与重试的异步请求方法
+ * @param {string} url - 请求地址
+ * @param {object} options - fetch配置
+ * @param {number} retries - 最大重试次数
+ * @param {number} timeout - 超时时长(ms)
+ * @returns {Promise<object>} - 请求返回的JSON数据
+ */
 async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     for (let i = 0; i <= retries; i++) {
         const controller = new AbortController();
@@ -99,6 +115,7 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
             return data;
         } catch (error) {
             clearTimeout(timeoutId);
+            // 非超时且还有重试次数则重试
             if (i < retries && error.name !== 'AbortError') {
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 continue;
@@ -108,64 +125,42 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     }
 }
 
-// === 批量操作按钮区渲染（只剩歌单相关） ===
-function renderBatchActionHeader() {
-    const container = document.getElementById('batch-action-header');
-    container.innerHTML = '';
-    // 歌单页面批量操作
-    if (currentMode === 'playlist') {
-        container.innerHTML = `
-            <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有歌单</button>
-            <button id="select-page-playlist-btn" class="p-2 bg-indigo-500 hover-effect rounded text-white">全选本页歌单</button>
-        `;
-        // 全选所有歌单（跨页）
-        document.getElementById('select-all-playlist-btn').onclick = async () => {
-            let allIds = [];
-            let fullPlaylistMap = {};
-            let total = totalItems;
-            let perPage = 100;
-            showLoading(true);
-            for (let i = 0; i < total; i += perPage) {
-                let data = await fetchWithRetry(
-                    `${cloudApi}/cloudsearch?keywords=${encodeURIComponent(searchKeywords)}&type=1000&limit=${perPage}&offset=${i}`
-                );
-                let items = data?.result?.playlists || [];
-                allIds = allIds.concat(items.map(p=>String(p.id)));
-                items.forEach(p => {
-                    fullPlaylistMap[String(p.id)] = p;
-                });
-            }
-            showLoading(false);
-            // 反选功能
-            if (selectedPlaylistIds.length === allIds.length) {
-                selectedPlaylistIds = [];
-            } else {
-                selectedPlaylistIds = [...allIds];
-            }
-            allPlaylistMap = fullPlaylistMap;
-            displayPlaylists(playlistState.playlists);
-        };
-        // 全选本页歌单
-        document.getElementById('select-page-playlist-btn').onclick = () => {
-            const resultsDiv = document.getElementById('search-results');
-            const playlistCheckboxes = Array.from(resultsDiv.querySelectorAll('.playlist-checkbox'));
-            const pageIds = playlistCheckboxes.map(cb => cb.dataset.id);
-            const allPageSelected = pageIds.every(id => selectedPlaylistIds.includes(id));
-            if (allPageSelected) {
-                selectedPlaylistIds = selectedPlaylistIds.filter(id => !pageIds.includes(id));
-            } else {
-                pageIds.forEach(id => {
-                    if (!selectedPlaylistIds.includes(id)) selectedPlaylistIds.push(id);
-                });
-            }
-            displayPlaylists(playlistState.playlists);
-        };
-    }
-    // 已删除 currentMode === 'search' 的“全选本页单曲”按钮及事件
-    container.classList.remove('hidden');
-}
+/* ==============================
+   3. 搜索与列表渲染相关
+   ============================== */
 
-// === 搜索主方法（单曲/歌单） ===
+/**
+ * 搜索按钮点击事件，初始化状态并发起搜索/跳转歌单
+ */
+document.getElementById('search-btn').addEventListener('click', async () => {
+    searchType = document.getElementById('search-type').value;
+    searchKeywords = document.getElementById('search-input').value.trim();
+    if (!searchKeywords) {
+        alert('请输入搜索关键词！');
+        return;
+    }
+    // 每次搜索时清空所有选中和缓存
+    currentPage = 1;
+    selectedSongsIds = [];
+    allSongsMap = {};
+    selectedPlaylistIds = [];
+    allPlaylistMap = {};
+    allSongIdsInPlaylist = [];
+    // 如果为歌单ID直接跳转详情页
+    if (searchType === '1000' && /^\d{5,}$/.test(searchKeywords)) {
+        currentMode = 'playlist-songs';
+        await tryOpenPlaylistById(searchKeywords);
+    } else {
+        currentMode = searchType === '1' ? 'search' : 'playlist';
+        showElements(true);
+        searchMusic();
+    }
+});
+
+/**
+ * 搜索主方法，根据类型请求单曲/歌单列表并渲染
+ * 单曲模式缓存当前页数据到lastSongList
+ */
 async function searchMusic() {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -175,12 +170,12 @@ async function searchMusic() {
         );
         showLoading(false);
         if (searchType === '1') {
-            // 单曲搜索
+            // 单曲模式：渲染单曲列表
             lastSongList = data.result.songs || [];
             displaySongs(lastSongList, 'search-results');
             totalItems = data.result.songCount || 0;
         } else {
-            // 歌单搜索
+            // 歌单模式：渲染歌单列表
             playlistState = { playlists: data.result.playlists || [], page: currentPage, keywords: searchKeywords };
             displayPlaylists(data.result.playlists || []);
             totalItems = data.result.playlistCount || 0;
@@ -193,7 +188,10 @@ async function searchMusic() {
     }
 }
 
-// === 跳转歌单详情页方法（根据歌单ID） ===
+/**
+ * 跳转歌单详情页（通过歌单ID），若找不到则重新搜索歌单列表
+ * @param {string} playlistId - 歌单ID
+ */
 async function tryOpenPlaylistById(playlistId) {
     showLoading(true);
     try {
@@ -214,7 +212,71 @@ async function tryOpenPlaylistById(playlistId) {
     }
 }
 
-// === 单曲列表渲染方法 ===
+/**
+ * 渲染批量操作按钮区，只保留歌单相关（彻底去除全选本页单曲按钮）
+ * 歌单页面提供“全选所有歌单”“全选本页歌单”按钮及逻辑
+ */
+function renderBatchActionHeader() {
+    const container = document.getElementById('batch-action-header');
+    container.innerHTML = '';
+    if (currentMode === 'playlist') {
+        // 仅歌单页面有批量操作按钮
+        container.innerHTML = `
+            <button id="select-all-playlist-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选所有歌单</button>
+            <button id="select-page-playlist-btn" class="p-2 bg-indigo-500 hover-effect rounded text-white">全选本页歌单</button>
+        `;
+        // 全选所有歌单（跨页，需多次请求）
+        document.getElementById('select-all-playlist-btn').onclick = async () => {
+            let allIds = [];
+            let fullPlaylistMap = {};
+            let total = totalItems;
+            let perPage = 100;
+            showLoading(true);
+            for (let i = 0; i < total; i += perPage) {
+                let data = await fetchWithRetry(
+                    `${cloudApi}/cloudsearch?keywords=${encodeURIComponent(searchKeywords)}&type=1000&limit=${perPage}&offset=${i}`
+                );
+                let items = data?.result?.playlists || [];
+                allIds = allIds.concat(items.map(p=>String(p.id)));
+                items.forEach(p => {
+                    fullPlaylistMap[String(p.id)] = p;
+                });
+            }
+            showLoading(false);
+            // 若已全选则反选，否则选中所有
+            if (selectedPlaylistIds.length === allIds.length) {
+                selectedPlaylistIds = [];
+            } else {
+                selectedPlaylistIds = [...allIds];
+            }
+            allPlaylistMap = fullPlaylistMap;
+            displayPlaylists(playlistState.playlists);
+        };
+        // 全选本页歌单（仅当前页）
+        document.getElementById('select-page-playlist-btn').onclick = () => {
+            const resultsDiv = document.getElementById('search-results');
+            const playlistCheckboxes = Array.from(resultsDiv.querySelectorAll('.playlist-checkbox'));
+            const pageIds = playlistCheckboxes.map(cb => cb.dataset.id);
+            const allPageSelected = pageIds.every(id => selectedPlaylistIds.includes(id));
+            if (allPageSelected) {
+                selectedPlaylistIds = selectedPlaylistIds.filter(id => !pageIds.includes(id));
+            } else {
+                pageIds.forEach(id => {
+                    if (!selectedPlaylistIds.includes(id)) selectedPlaylistIds.push(id);
+                });
+            }
+            displayPlaylists(playlistState.playlists);
+        };
+    }
+    // 单曲页面已无批量操作按钮
+    container.classList.remove('hidden');
+}
+
+/**
+ * 渲染单曲列表，每条包含封面、歌名、歌手、预览/下载按钮、复选框
+ * @param {Array} songs - 单曲对象数组
+ * @param {string} containerId - 渲染结果容器ID
+ */
 function displaySongs(songs, containerId) {
     renderBatchActionHeader();
     const resultsDiv = document.getElementById(containerId);
@@ -225,8 +287,9 @@ function displaySongs(songs, containerId) {
     }
     songs.forEach(song => {
         const idStr = String(song.id);
-        // 支持不同接口歌手字段
+        // 兼容不同API的歌手字段
         const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
+        // 是否选中
         const checked = selectedSongsIds.includes(idStr) ? 'checked' : '';
         const songDiv = document.createElement('div');
         songDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md transition-all duration-200';
@@ -250,10 +313,10 @@ function displaySongs(songs, containerId) {
             </button>
         `;
         resultsDiv.appendChild(songDiv);
-        // 缓存歌曲信息
+        // 缓存歌曲信息（批量下载用）
         allSongsMap[idStr] = { id: idStr, name: song.name + ' - ' + artists };
     });
-    // 选中/取消单曲
+    // 复选框事件：选中/取消时更新selectedSongsIds
     resultsDiv.querySelectorAll('.song-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
             const songId = this.dataset.id;
@@ -266,7 +329,10 @@ function displaySongs(songs, containerId) {
     });
 }
 
-// === 歌单列表渲染方法 ===
+/**
+ * 渲染歌单列表，每条包含封面、歌单名、歌曲数、复选框
+ * @param {Array} playlists - 歌单对象数组
+ */
 function displayPlaylists(playlists) {
     renderBatchActionHeader();
     allPlaylistMap = {};
@@ -289,7 +355,7 @@ function displayPlaylists(playlists) {
             <img src="${playlist.coverImgUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-5">
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
-        // 点击进入歌单详情
+        // 点击歌单区域可进入歌单详情页
         playlistDiv.addEventListener('click', (event) => {
             if (event.target.closest('input[type="checkbox"]')) return;
             currentMode = 'playlist-songs';
@@ -301,7 +367,7 @@ function displayPlaylists(playlists) {
         });
         resultsDiv.appendChild(playlistDiv);
     });
-    // 歌单复选框事件
+    // 歌单复选框事件：选中/取消时更新selectedPlaylistIds
     resultsDiv.querySelectorAll('.playlist-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
             const pid = String(this.dataset.id);
@@ -314,12 +380,15 @@ function displayPlaylists(playlists) {
     });
 }
 
-// === 分页渲染方法 ===
+/**
+ * 渲染分页导航区，支持大页码横向滚动
+ */
 function renderPagination() {
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
     const totalPages = Math.ceil(totalItems / itemsPerPage);
     if (totalPages <= 15) {
+        // 小页数直接渲染所有页码
         for (let i = 1; i <= totalPages; i++) {
             const pageLink = document.createElement('a');
             pageLink.href = '#';
@@ -333,6 +402,7 @@ function renderPagination() {
             paginationDiv.appendChild(pageLink);
         }
     } else {
+        // 大页数横向滚动
         const scrollContainer = document.createElement('div');
         scrollContainer.className = 'overflow-x-auto whitespace-nowrap';
         for (let i = 1; i <= totalPages; i++) {
@@ -351,7 +421,9 @@ function renderPagination() {
     }
 }
 
-// === 分页切换处理 ===
+/**
+ * 页码切换时刷新视图
+ */
 function updatePagination() {
     if (currentMode === 'playlist') {
         searchMusic();
@@ -362,7 +434,12 @@ function updatePagination() {
     }
 }
 
-// === 歌单详情页歌曲列表拉取与渲染 ===
+/**
+ * 歌单详情页拉取当前页歌曲列表并渲染
+ * @param {string|number} playlistId - 歌单ID
+ * @param {string} playlistName - 歌单名
+ * @param {number} trackCount - 歌单歌曲总数
+ */
 async function openPlaylist(playlistId, playlistName, trackCount) {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -386,7 +463,9 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
     }
 }
 
-// === 歌单详情页“全选”按钮（跨页）处理 ===
+/**
+ * 歌单详情页“全选”按钮，跨页全选所有歌曲
+ */
 async function selectAllHandler() {
     if (!playlistState?.id) return;
     if (!allSongIdsInPlaylist.length) {
@@ -400,6 +479,7 @@ async function selectAllHandler() {
         }
         allSongIdsInPlaylist = allIds;
     }
+    // 若已全选则反选，否则选中所有
     if (selectedSongsIds.length === allSongIdsInPlaylist.length) {
         selectedSongsIds = [];
     } else {
@@ -408,7 +488,9 @@ async function selectAllHandler() {
     openPlaylist(playlistState.id, playlistState.name, playlistState.trackCount);
 }
 
-// === 歌单详情页返回按钮处理 ===
+/**
+ * 歌单详情页返回按钮，恢复到歌单列表页
+ */
 function backHandler() {
     currentMode = 'playlist';
     currentPage = playlistState.page || 1;
@@ -419,15 +501,21 @@ function backHandler() {
     document.getElementById('playlist-details').classList.add('hidden');
 }
 
-// === 单曲操作区点击处理（预览、下载等） ===
+/* ==============================
+   4. 单曲操作区事件委托
+   ============================== */
+
+/**
+ * 页面全局点击事件，处理预览、下载、复选框点选等
+ */
 document.addEventListener('click', async (e) => {
     const previewDiv = document.getElementById('preview');
-    // 关闭预览
+    // 非预览区点击时关闭预览弹窗
     if (!e.target.closest('#preview') && !e.target.closest('.preview-btn') && !previewDiv.classList.contains('hidden')) {
         previewDiv.classList.add('hidden');
         previewDiv.innerHTML = '';
     }
-    // 点击歌曲名区域切换选中
+    // 点击歌曲名区，切换勾选状态（复选框同步）
     if (e.target.closest('span.cursor-pointer')) {
         const checkbox = e.target.closest('span').parentElement.querySelector('.song-checkbox');
         checkbox.checked = !checkbox.checked;
@@ -438,7 +526,7 @@ document.addEventListener('click', async (e) => {
             selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
         }
     }
-    // 预览按钮
+    // 预览按钮，弹窗播放音频
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
@@ -453,7 +541,6 @@ document.addEventListener('click', async (e) => {
                 alert('无法预览该歌曲！API返回内容：' + songUrl);
                 return;
             }
-            // 创建预览弹窗
             previewDiv.classList.remove('hidden');
             previewDiv.style.position = 'fixed';
             previewDiv.style.bottom = '20px';
@@ -476,7 +563,7 @@ document.addEventListener('click', async (e) => {
             previewDiv.classList.add('hidden');
         }
     }
-    // 单曲下载按钮
+    // 下载按钮，单曲下载（自动识别音频格式）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
         const fileName = e.target.closest('.download-btn').dataset.name;
@@ -499,7 +586,6 @@ document.addEventListener('click', async (e) => {
             }
             const musicResponse = await fetch(songUrl);
             if (!musicResponse.ok) throw new Error('下载歌曲失败');
-            // 自动识别音频格式后缀
             let ext = 'mp3';
             try {
                 ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
@@ -530,7 +616,14 @@ document.addEventListener('click', async (e) => {
     }
 });
 
-// === 获取当前时间字符串（用于打包下载文件名） ===
+/* ==============================
+   5. 批量下载及辅助函数
+   ============================== */
+
+/**
+ * 获取当前时间字符串（用于zip包名）
+ * @returns {string} - 格式化时间字符串
+ */
 function getNowTimeStr() {
     const now = new Date();
     const Y = now.getFullYear();
@@ -541,7 +634,9 @@ function getNowTimeStr() {
     return `${Y}年${M}月${D}日${h}-${m}`;
 }
 
-// === 批量下载选中单曲按钮处理 ===
+/**
+ * 批量下载选中单曲，生成zip文件并触发保存
+ */
 document.getElementById('download-btn').addEventListener('click', async () => {
     selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
     if (selectedSongs.length === 0) {
@@ -561,7 +656,6 @@ document.getElementById('download-btn').addEventListener('click', async () => {
             const url = `${apiBase}?id=${song.id}&level=${quality}`;
             let songUrl = await fetch(url).then(r => r.text());
             if (!songUrl.startsWith('http')) continue;
-            // 自动识别音频格式后缀
             let ext = 'mp3';
             try {
                 ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
@@ -569,7 +663,6 @@ document.getElementById('download-btn').addEventListener('click', async () => {
             } catch(e) { ext = 'mp3'; }
             let musicBlob = await fetch(songUrl).then(r => r.blob());
             zip.file(`${song.name}.${ext}`, musicBlob);
-
             let percent = Math.round((i + 1) / total * 100);
             let elapsed = (Date.now() - startTime) / 1000;
             let avg = elapsed / (i + 1);
@@ -596,7 +689,12 @@ document.getElementById('download-btn').addEventListener('click', async () => {
     }
 });
 
-// === 批量下载整个歌单并返回zip二进制 ===
+/**
+ * 批量下载整个歌单，返回zip二进制（用于其它扩展场景）
+ * @param {string|number} pid - 歌单ID
+ * @param {string} pname - 歌单名
+ * @returns {Promise<Blob|null>} - 返回打包好的zip文件Blob
+ */
 async function batchDownloadPlaylistReturnZip(pid, pname) {
     showProgress(true, 0, `正在获取歌单: ${pname}`);
     let allSongs = [];
@@ -617,7 +715,6 @@ async function batchDownloadPlaylistReturnZip(pid, pname) {
             let url = `${apiBase}?id=${ids[i]}&level=${quality}`;
             let songUrl = await fetch(url).then(r=>r.text());
             if (!songUrl.startsWith('http')) continue;
-            // 自动识别音频格式后缀
             let ext = 'mp3';
             try {
                 ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
