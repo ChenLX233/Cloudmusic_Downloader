@@ -16,6 +16,7 @@ let allSongIdsInPlaylist = []; // 歌单详情页所有歌曲ID
 
 const apiBase = 'https://api.lxchen.cn/api';
 const cloudApi = 'https://163api.qijieya.cn';
+let lastSongList = []; // 保存当前页歌曲列表
 
 function showProgress(show, percent = 0, info = "") {
     const pc = document.getElementById('progress-container');
@@ -150,7 +151,7 @@ function renderBatchActionHeader() {
             <button id="select-all-song-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选本页单曲</button>
         `;
         document.getElementById('select-all-song-btn').onclick = () => {
-            // 全选本页单曲
+            // 全选本页单曲，不重新请求，只刷新当前列表
             const resultsDiv = document.getElementById('search-results');
             const songCheckboxes = Array.from(resultsDiv.querySelectorAll('.song-checkbox'));
             const pageIds = songCheckboxes.map(cb => cb.dataset.id);
@@ -162,7 +163,8 @@ function renderBatchActionHeader() {
                     if (!selectedSongsIds.includes(id)) selectedSongsIds.push(id);
                 });
             }
-            searchMusic();
+            // 只刷新当前页，无需重新searchMusic
+            displaySongs(lastSongList, 'search-results');
         };
     }
     container.classList.remove('hidden');
@@ -177,7 +179,8 @@ async function searchMusic() {
         );
         showLoading(false);
         if (searchType === '1') {
-            displaySongs(data.result.songs || [], 'search-results');
+            lastSongList = data.result.songs || [];
+            displaySongs(lastSongList, 'search-results');
             totalItems = data.result.songCount || 0;
         } else {
             playlistState = { playlists: data.result.playlists || [], page: currentPage, keywords: searchKeywords };
@@ -363,7 +366,8 @@ async function openPlaylist(playlistId, playlistName, trackCount) {
         selectAllBtn.addEventListener('click', selectAllHandler);
         document.getElementById('back-btn').removeEventListener('click', backHandler);
         document.getElementById('back-btn').addEventListener('click', backHandler, { once: true });
-        displaySongs(data.songs, 'search-results');
+        lastSongList = data.songs || [];
+        displaySongs(lastSongList, 'search-results');
         totalItems = trackCount || data.songs.length;
         renderPagination();
         showElements(true);
