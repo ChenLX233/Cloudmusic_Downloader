@@ -1,7 +1,6 @@
 /**
  * 音乐批量下载器主脚本（支持下载选中歌单，按钮功能随模式切换）
  * BY Enashpinal
- * 
  * 详细注释覆盖所有核心功能与交互逻辑。
  */
 
@@ -89,6 +88,11 @@ function showLoading(show) {
 
 /**
  * 支持超时和重试的 fetch 封装
+ * @param {string} url
+ * @param {object} options
+ * @param {number} retries
+ * @param {number} timeout
+ * @returns {Promise<object>}
  */
 async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     for (let i = 0; i <= retries; i++) {
@@ -474,6 +478,7 @@ function backHandler() {
 
 /**
  * 下载所选单曲（单曲页面和歌单详情页）
+ * 自动识别后端实际返回的文件名/扩展名
  */
 async function downloadSelectedSongs() {
     selectedSongs = selectedSongsIds.map(id => allSongsMap[id]).filter(Boolean);
@@ -491,17 +496,39 @@ async function downloadSelectedSongs() {
         let startTime = Date.now();
         for (let i = 0; i < total; i++) {
             const song = selectedSongs[i];
+            // 请求后端 API 获取真实直链
             const url = `${apiBase}?id=${song.id}&level=${quality}`;
             let songUrl = await fetch(url).then(r => r.text());
             if (!songUrl.startsWith('http')) continue;
-            let ext = 'mp3';
-            try {
-                ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
-                if (!/^mp3|flac|wav|ape$/.test(ext)) ext = 'mp3';
-            } catch(e) { ext = 'mp3'; }
-            let musicBlob = await fetch(songUrl).then(r => r.blob());
-            zip.file(`${song.name}.${ext}`, musicBlob);
 
+            // 请求后端直链，获取真实音频文件及头部
+            const musicResponse = await fetch(songUrl);
+            if (!musicResponse.ok) continue;
+
+            // 解析 Content-Disposition 以及 Content-Type
+            const disposition = musicResponse.headers.get('Content-Disposition') || '';
+            let ext = 'mp3';
+            let filename = song.name;
+            const filenameMatch = /filename="?([^"]+)"?/.exec(disposition);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+                ext = filename.split('.').pop().toLowerCase();
+            } else {
+                // 没有 filename 时用 MIME 类型推断后缀
+                const mime = musicResponse.headers.get('Content-Type') || '';
+                if (mime.includes('flac')) ext = 'flac';
+                else if (mime.includes('mp3')) ext = 'mp3';
+                else if (mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
+                else ext = 'mp3';
+                filename = `${song.name}.${ext}`;
+            }
+
+            // 获取音频 Blob
+            const musicBlob = await musicResponse.blob();
+            // 加入 ZIP 包
+            zip.file(filename, musicBlob);
+
+            // 进度显示
             let percent = Math.round((i + 1) / total * 100);
             let elapsed = (Date.now() - startTime) / 1000;
             let avg = elapsed / (i + 1);
@@ -512,6 +539,7 @@ async function downloadSelectedSongs() {
             showProgress(true, percent, info);
         }
         showProgress(true, 100, "正在打包...");
+        // 生成 ZIP 并下载
         const content = await zip.generateAsync({ type: 'blob' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
@@ -530,6 +558,7 @@ async function downloadSelectedSongs() {
 
 /**
  * 下载所选歌单（歌单页面），每个歌单打包为一个文件夹
+ * 自动识别后端实际返回的文件名/扩展名
  */
 async function downloadSelectedPlaylists() {
     if (!selectedPlaylistIds.length) {
@@ -561,16 +590,38 @@ async function downloadSelectedPlaylists() {
                 songIdx++;
                 let id = song.id;
                 let songName = song.name + ' - ' + (song.ar ? song.ar.map(a=>a.name).join(',') : '');
+
+                // 请求后端 API 获取真实直链
                 let url = `${apiBase}?id=${id}&level=${quality}`;
                 let songUrl = await fetch(url).then(r => r.text());
                 if (!songUrl.startsWith('http')) continue;
+
+                // 请求后端直链，获取真实音频文件及头部
+                const musicResponse = await fetch(songUrl);
+                if (!musicResponse.ok) continue;
+
+                // 解析 Content-Disposition 以及 Content-Type
+                const disposition = musicResponse.headers.get('Content-Disposition') || '';
                 let ext = 'mp3';
-                try {
-                    ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
-                    if (!/^mp3|flac|wav|ape$/.test(ext)) ext = 'mp3';
-                } catch(e) { ext = 'mp3'; }
-                let musicBlob = await fetch(songUrl).then(r => r.blob());
-                folder.file(`${songName}.${ext}`, musicBlob);
+                let filename = songName;
+                const filenameMatch = /filename="?([^"]+)"?/.exec(disposition);
+                if (filenameMatch) {
+                    filename = filenameMatch[1];
+                    ext = filename.split('.').pop().toLowerCase();
+                } else {
+                    const mime = musicResponse.headers.get('Content-Type') || '';
+                    if (mime.includes('flac')) ext = 'flac';
+                    else if (mime.includes('mp3')) ext = 'mp3';
+                    else if (mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
+                    else ext = 'mp3';
+                    filename = `${songName}.${ext}`;
+                }
+
+                // 获取音频 Blob
+                const musicBlob = await musicResponse.blob();
+                // 加入 ZIP 文件夹
+                folder.file(filename, musicBlob);
+
                 // 进度显示
                 let percent = Math.round((playlistIdx-1)/totalPlaylists*100 + songIdx/allSongs.length*100/totalPlaylists);
                 let info = `正在打包: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
@@ -675,11 +726,26 @@ document.addEventListener('click', async (e) => {
             }
             const musicResponse = await fetch(songUrl);
             if (!musicResponse.ok) throw new Error('下载歌曲失败');
+
+            // 新增：获取后端真实文件名和类型
+            const disposition = musicResponse.headers.get('Content-Disposition') || '';
             let ext = 'mp3';
-            try {
-                ext = songUrl.split('?')[0].split('.').pop().toLowerCase();
-                if (!/^mp3|flac|wav|ape$/.test(ext)) ext = 'mp3';
-            } catch(e) { ext = 'mp3'; }
+            let filename = fileName;
+            // 解析扩展名
+            const filenameMatch = /filename="?([^"]+)"?/.exec(disposition);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+                ext = filename.split('.').pop().toLowerCase();
+            } else {
+                // 没有filename就用MIME类型
+                const mime = musicResponse.headers.get('Content-Type') || '';
+                if (mime.includes('flac')) ext = 'flac';
+                else if (mime.includes('mp3')) ext = 'mp3';
+                else if (mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
+                else ext = 'mp3';
+                filename = `${fileName}.${ext}`;
+            }
+
             let fakePercent = 30;
             const fakeUpdate = setInterval(() => {
                 fakePercent += Math.random() * 10;
@@ -691,7 +757,7 @@ document.addEventListener('click', async (e) => {
             showProgress(true, 100, "准备保存...");
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = `${fileName}.${ext}`;
+            link.download = filename;
             link.click();
             setTimeout(() => showProgress(false), 700);
             isDownloading = false;
