@@ -146,29 +146,29 @@ function renderBatchActionHeader() {
             displayPlaylists(playlistState.playlists);
         };
     }
-    if (currentMode === 'search') {
-        container.innerHTML = `
-            <button id="select-all-song-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选本页单曲</button>
-        `;
-        document.getElementById('select-all-song-btn').onclick = () => {
-            // 全选本页单曲，不重新请求，只刷新当前列表
-            const resultsDiv = document.getElementById('search-results');
-            const songCheckboxes = Array.from(resultsDiv.querySelectorAll('.song-checkbox'));
-            const pageIds = songCheckboxes.map(cb => cb.dataset.id);
-            const allPageSelected = pageIds.every(id => selectedSongsIds.includes(id));
-            if (allPageSelected) {
-                selectedSongsIds = selectedSongsIds.filter(id => !pageIds.includes(id));
-            } else {
-                pageIds.forEach(id => {
-                    if (!selectedSongsIds.includes(id)) selectedSongsIds.push(id);
-                });
-            }
-            // 只刷新当前页，无需重新searchMusic
-            displaySongs(lastSongList, 'search-results');
-        };
-    }
-    container.classList.remove('hidden');
-}
+//     if (currentMode === 'search') {
+//         container.innerHTML = `
+//             <button id="select-all-song-btn" class="p-2 bg-blue-500 hover-effect rounded text-white">全选本页单曲</button>
+//         `;
+//         document.getElementById('select-all-song-btn').onclick = () => {
+//             // 全选本页单曲，不重新请求，只刷新当前列表
+//             const resultsDiv = document.getElementById('search-results');
+//             const songCheckboxes = Array.from(resultsDiv.querySelectorAll('.song-checkbox'));
+//             const pageIds = songCheckboxes.map(cb => cb.dataset.id);
+//             const allPageSelected = pageIds.every(id => selectedSongsIds.includes(id));
+//             if (allPageSelected) {
+//                 selectedSongsIds = selectedSongsIds.filter(id => !pageIds.includes(id));
+//             } else {
+//                 pageIds.forEach(id => {
+//                     if (!selectedSongsIds.includes(id)) selectedSongsIds.push(id);
+//                 });
+//             }
+//             // 只刷新当前页，无需重新searchMusic
+//             displaySongs(lastSongList, 'search-results');
+//         };
+//     }
+//     container.classList.remove('hidden');
+// }
 
 async function searchMusic() {
     showLoading(true);
