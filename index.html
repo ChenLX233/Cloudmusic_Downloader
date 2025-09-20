@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>音乐批量下载器 By Enashpinal</title>
+    <title>云云音乐批量下载器</title>
     <!-- 引入 TailwindCSS 用于布局和样式 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入 JSZip 用于前端打包 ZIP 文件 -->
@@ -96,6 +96,7 @@
     <header class="glass-effect py-6 shadow-lg">
         <div class="container mx-auto px-4">
             <h1 class="text-3xl font-bold text-center">音乐批量下载器</h1>
+            <p class="text-xs text-center text-gray-500 mt-1">下载速度非常慢(‾◡◝)</p>
             <div class="flex justify-center mt-4 gap-2">
                 <!-- 搜索类型选择：单曲/歌单 -->
                 <select id="search-type" class="p-2 bg-transparent glass-effect">
@@ -122,7 +123,7 @@
                     <option value="standard">标准 (128k)</option>
                     <option value="exhigh">极高 (320k)</option>
                     <option value="lossless">无损 (FLAC)</option>
-                    <option value="hires">Hi-Res (24bit)</option>
+                    <option value="hires">Hi-Res (24bit/96kHz)</option>
                     <option value="jyeffect">高清环绕声</option>
                 </select>
             </div>
