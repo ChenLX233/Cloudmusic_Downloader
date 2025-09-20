@@ -29,7 +29,7 @@ let allPlaylistMap = {};           // 当前页所有歌单对象映射
 let allSongIdsInPlaylist = [];     // 当前歌单所有歌曲ID（用于歌单详情页全选）
 let lastSongList = [];             // 当前页歌曲列表缓存
 
-const apiBase = 'https://api.lxchen.cn';       // 自建API根地址
+const apiBase = 'https://api.lxchen.cn:1145';       // 自建API根地址
 const cloudApi = 'https://163api.qijieya.cn';      // 云API
 
 // =======================
