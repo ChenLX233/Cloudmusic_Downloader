@@ -3,7 +3,7 @@
  * BY Enashpinal 
  * 详细注释覆盖所有核心功能与交互逻辑。
  * 
- * 下载相关逻辑已升级，已适配自建API POST下载接口：
+ * 下载相关逻辑已升级，已适配toubiec API直链接口：
  * - 文件名始终采用“歌名 - 歌手名”，而不是后端filename或自定义名。
  * - 非无损/hires音质全部保存为mp3扩展名，无损/hires按后端类型（优先flac）。
  * - 其它功能（搜索、歌单、分页、全选、预览等）全部原样保留。
@@ -29,8 +29,10 @@ let allPlaylistMap = {};           // 当前页所有歌单对象映射
 let allSongIdsInPlaylist = [];     // 当前歌单所有歌曲ID（用于歌单详情页全选）
 let lastSongList = [];             // 当前页歌曲列表缓存
 
-const apiBase = 'https://api.toubiec.cn/wyapi/';       // 自建API根地址
-const cloudApi = 'https://163api.qijieya.cn';      // 云API
+// const apiBase = 'https://musicapi. .cn';       // 自建API根地址（已弃用）
+// const apiBase = 'https://163api.qijieya.cn';      // 云API（仅搜索相关）
+const apiBase = 'https://api.toubiec.cn/wyapi/getMusicUrl.php'; // 新API：用于获取音频直链
+const cloudApi = 'https://163api.qijieya.cn';      // 云API（仅用于搜索/歌单等）
 
 // =======================
 // 2. UI显示/动画相关方法
@@ -428,7 +430,7 @@ function backHandler() {
 }
 
 // =======================
-// 5. 下载相关（已升级为POST下载接口）
+// 5. 下载相关（已适配toubiec直链API接口）
 // =======================
 
 async function downloadSelectedSongs() {
@@ -447,14 +449,17 @@ async function downloadSelectedSongs() {
         let startTime = Date.now();
         for (let i = 0; i < total; i++) {
             const song = selectedSongs[i];
-            // 直接POST拿音频流
-            const resp = await fetch(`${apiBase}/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: song.id, quality: quality })
-            });
-            if (!resp.ok) continue;
-            const contentType = resp.headers.get('Content-Type') || '';
+            // ---- 修改处: 先获取直链，再下载音频 ----
+            // 1. 获取音频直链
+            const urlResp = await fetch(`${apiBase}?id=${song.id}&level=${quality}`);
+            const urlJson = await urlResp.json();
+            if (!urlJson.data || !urlJson.data[0] || !urlJson.data[0].url) continue;
+            const musicUrl = urlJson.data[0].url;
+
+            // 2. 获取音频内容
+            const musicResp = await fetch(musicUrl);
+            if (!musicResp.ok) continue;
+            const contentType = musicResp.headers.get('Content-Type') || '';
             let ext = 'mp3';
             if (['lossless', 'hires', 'jyeffect'].includes(quality)) {
                 if (/flac/i.test(contentType)) ext = 'flac';
@@ -465,7 +470,7 @@ async function downloadSelectedSongs() {
                 ext = 'mp3';
             }
             let filename = `${song.name}.${ext}`;
-            zip.file(filename, await resp.blob());
+            zip.file(filename, await musicResp.blob());
 
             let percent = Math.round((i + 1) / total * 100);
             let elapsed = (Date.now() - startTime) / 1000;
@@ -530,14 +535,15 @@ async function downloadSelectedPlaylists() {
                 songIdx++;
                 let id = song.id;
                 let songName = song.name + ' - ' + (song.ar ? song.ar.map(a=>a.name).join(',') : '');
-                // 直接POST拿音频流
-                const resp = await fetch(`${apiBase}/download`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id, quality: quality })
-                });
-                if (!resp.ok) continue;
-                const contentType = resp.headers.get('Content-Type') || '';
+                // ---- 修改处: 先获取直链，再下载音频 ----
+                const urlResp = await fetch(`${apiBase}?id=${id}&level=${quality}`);
+                const urlJson = await urlResp.json();
+                if (!urlJson.data || !urlJson.data[0] || !urlJson.data[0].url) continue;
+                const musicUrl = urlJson.data[0].url;
+
+                const musicResp = await fetch(musicUrl);
+                if (!musicResp.ok) continue;
+                const contentType = musicResp.headers.get('Content-Type') || '';
                 let ext = 'mp3';
                 if (['lossless', 'hires', 'jyeffect'].includes(quality)) {
                     if (/flac/i.test(contentType)) ext = 'flac';
@@ -548,7 +554,7 @@ async function downloadSelectedPlaylists() {
                     ext = 'mp3';
                 }
                 let filename = safeName(songName) + '.' + ext;
-                playlistZip.file(filename, await resp.blob());
+                playlistZip.file(filename, await musicResp.blob());
 
                 let percent = Math.round((playlistIdx-1)/totalPlaylists*100 + songIdx/allSongs.length*100/totalPlaylists);
                 let info = `正在下载: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
@@ -602,14 +608,15 @@ document.addEventListener('click', async (e) => {
         const quality = document.getElementById('quality-select').value || 'standard';
         showLoading(true);
         try {
-            // 直接POST拿音频流
-            const resp = await fetch(`${apiBase}/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: songId, quality: quality })
-            });
-            if (!resp.ok) throw new Error('获取音频失败');
-            const blob = await resp.blob();
+            // ---- 修改处: 先获取直链，再下载音频 ----
+            const urlResp = await fetch(`${apiBase}?id=${songId}&level=${quality}`);
+            const urlJson = await urlResp.json();
+            if (!urlJson.data || !urlJson.data[0] || !urlJson.data[0].url) throw new Error('未获取到音频直链');
+            const musicUrl = urlJson.data[0].url;
+
+            const musicResp = await fetch(musicUrl);
+            if (!musicResp.ok) throw new Error('获取音频失败');
+            const blob = await musicResp.blob();
             const url = URL.createObjectURL(blob);
             showLoading(false);
             previewDiv.classList.remove('hidden');
@@ -643,14 +650,15 @@ document.addEventListener('click', async (e) => {
         showLoading(true);
         showProgress(true, 0, "正在下载音频...");
         try {
-            // 直接POST拿音频流
-            const resp = await fetch(`${apiBase}/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: songId, quality: quality })
-            });
-            if (!resp.ok) throw new Error('下载失败');
-            const contentType = resp.headers.get('Content-Type') || '';
+            // ---- 修改处: 先获取直链，再下载音频 ----
+            const urlResp = await fetch(`${apiBase}?id=${songId}&level=${quality}`);
+            const urlJson = await urlResp.json();
+            if (!urlJson.data || !urlJson.data[0] || !urlJson.data[0].url) throw new Error('未获取到音频直链');
+            const musicUrl = urlJson.data[0].url;
+
+            const musicResp = await fetch(musicUrl);
+            if (!musicResp.ok) throw new Error('下载失败');
+            const contentType = musicResp.headers.get('Content-Type') || '';
             let ext = 'mp3';
             if (['lossless', 'hires', 'jyeffect'].includes(quality)) {
                 if (/flac/i.test(contentType)) ext = 'flac';
@@ -661,7 +669,7 @@ document.addEventListener('click', async (e) => {
                 ext = 'mp3';
             }
             let filename = `${fileNameOrigin}.${ext}`;
-            const blob = await resp.blob();
+            const blob = await musicResp.blob();
             showProgress(true, 100, "准备保存...");
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
