@@ -456,7 +456,7 @@ async function downloadSelectedSongs() {
             if (!resp.ok) continue;
             const contentType = resp.headers.get('Content-Type') || '';
             let ext = 'mp3';
-            if (quality === 'lossless' || quality === 'hires') {
+            if (['lossless', 'hires', 'jyeffect'].includes(quality)) {
                 if (/flac/i.test(contentType)) ext = 'flac';
                 else if (/mp3/i.test(contentType)) ext = 'mp3';
                 else if (/m4a|aac/i.test(contentType)) ext = 'm4a';
@@ -539,7 +539,7 @@ async function downloadSelectedPlaylists() {
                 if (!resp.ok) continue;
                 const contentType = resp.headers.get('Content-Type') || '';
                 let ext = 'mp3';
-                if (quality === 'lossless' || quality === 'hires') {
+                if (['lossless', 'hires', 'jyeffect'].includes(quality)) {
                     if (/flac/i.test(contentType)) ext = 'flac';
                     else if (/mp3/i.test(contentType)) ext = 'mp3';
                     else if (/m4a|aac/i.test(contentType)) ext = 'm4a';
@@ -652,7 +652,7 @@ document.addEventListener('click', async (e) => {
             if (!resp.ok) throw new Error('下载失败');
             const contentType = resp.headers.get('Content-Type') || '';
             let ext = 'mp3';
-            if (quality === 'lossless' || quality === 'hires') {
+            if (['lossless', 'hires', 'jyeffect'].includes(quality)) {
                 if (/flac/i.test(contentType)) ext = 'flac';
                 else if (/mp3/i.test(contentType)) ext = 'mp3';
                 else if (/m4a|aac/i.test(contentType)) ext = 'm4a';
