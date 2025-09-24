@@ -31,7 +31,7 @@ let lastSongList = [];             // 当前页歌曲列表缓存
 
 // const apiBase = 'https://musicapi. .cn';       // 自建API根地址（已弃用）
 // const apiBase = 'https://163api.qijieya.cn';      // 云API（仅搜索相关）
-const apiBase = 'https://api.toubiec.cn/wyapi/getMusicUrl.php'; // 新API：用于获取音频直链
+const apiBase = 'https://wyapi.toubiec.cn/api/music/'; // 新API：用于获取音频直链
 const cloudApi = 'https://163api.qijieya.cn';      // 云API（仅用于搜索/歌单等）
 
 // =======================
