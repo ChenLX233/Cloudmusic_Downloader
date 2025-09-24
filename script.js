@@ -7,6 +7,8 @@
  * - 文件名始终采用“歌名 - 歌手名”，而不是后端filename或自定义名。
  * - 非无损/hires音质全部保存为mp3扩展名，无损/hires按后端类型（优先flac）。
  * - 其它功能（搜索、歌单、分页、全选、预览等）全部原样保留。
+ * 
+ * 歌曲封面图和专辑封面图已适配 tenapi.cn/v2/songinfo 接口自动获取
  */
 
 // =======================
@@ -234,6 +236,26 @@ async function tryOpenPlaylistById(playlistId) {
     }
 }
 
+/**
+ * 获取歌曲封面（tenapi.cn/v2/songinfo）
+ * @param {number|string} songId 
+ * @returns {Promise<string>} 返回图片URL
+ */
+async function getSongCover(songId) {
+    try {
+        const resp = await fetch('https://tenapi.cn/v2/songinfo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `id=${songId}`
+        });
+        const result = await resp.json();
+        if (result.code === 200 && result.data && result.data.cover) {
+            return result.data.cover;
+        }
+    } catch (e) {}
+    return 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'; // 默认
+}
+
 function displaySongs(songs, containerId) {
     renderBatchActionHeader();
     const resultsDiv = document.getElementById(containerId);
@@ -242,16 +264,19 @@ function displaySongs(songs, containerId) {
         resultsDiv.innerHTML = '<p>无结果</p>';
         return;
     }
-    songs.forEach(song => {
+    // 异步逐个渲染，保证封面获取
+    songs.forEach(async song => {
         const idStr = String(song.id);
         const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
         const checked = selectedSongsIds.includes(idStr) ? 'checked' : '';
+        const coverUrl = await getSongCover(idStr);
+
         const songDiv = document.createElement('div');
         songDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md transition-all duration-200';
         songDiv.innerHTML = `
             <input type="checkbox" class="song-checkbox w-5 h-5 mr-2 appearance-none border-2 border-gray-400 rounded checked:bg-blue-500 checked:border-blue-500 transition-all duration-200"
                 data-id="${idStr}" ${checked}>
-            <img src="${song.al?.picUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-2">
+            <img src="${coverUrl}" alt="封面" class="w-12 h-12 rounded mr-2">
             <span class="flex-1 cursor-pointer" data-id="${idStr}">
                 ${song.name} <span class="text-gray-500 text-sm"> - ${artists}</span>
             </span>
@@ -282,6 +307,21 @@ function displaySongs(songs, containerId) {
     });
 }
 
+async function getPlaylistCover(playlist) {
+    // 方案1：使用歌单原coverImgUrl
+    if (playlist.coverImgUrl) return playlist.coverImgUrl;
+    // 方案2：用歌单第一首歌的封面
+    if (playlist.id && playlist.trackCount > 0) {
+        try {
+            const detail = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlist.id}&limit=1&offset=0`);
+            if (detail.songs && detail.songs.length > 0) {
+                return await getSongCover(detail.songs[0].id);
+            }
+        } catch (e) {}
+    }
+    return 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg';
+}
+
 function displayPlaylists(playlists) {
     renderBatchActionHeader();
     allPlaylistMap = {};
@@ -291,9 +331,11 @@ function displayPlaylists(playlists) {
         resultsDiv.innerHTML = '<p>无结果</p>';
         return;
     }
-    playlists.forEach(playlist => {
+    playlists.forEach(async playlist => {
         allPlaylistMap[playlist.id] = playlist;
         const checked = selectedPlaylistIds.includes(String(playlist.id)) ? 'checked' : '';
+        const playlistPic = await getPlaylistCover(playlist);
+
         const playlistDiv = document.createElement('div');
         playlistDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md cursor-pointer transition-all duration-200';
         playlistDiv.dataset.id = playlist.id;
@@ -301,7 +343,7 @@ function displayPlaylists(playlists) {
         playlistDiv.dataset.trackCount = playlist.trackCount;
         playlistDiv.innerHTML = `
             <input type="checkbox" class="playlist-checkbox w-5 h-5 mr-2" data-id="${playlist.id}" ${checked}>
-            <img src="${playlist.coverImgUrl || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'}" alt="封面" class="w-12 h-12 rounded mr-5">
+            <img src="${playlistPic}" alt="封面" class="w-12 h-12 rounded mr-5">
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
         playlistDiv.addEventListener('click', (event) => {
@@ -428,7 +470,7 @@ function backHandler() {
 }
 
 // =======================
-// 5. 下载相关（已升级为POST下载接口）
+// 5. 下载相关（原逻辑不变）
 // =======================
 
 async function downloadSelectedSongs() {
