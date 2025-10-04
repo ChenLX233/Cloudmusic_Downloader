@@ -1,14 +1,12 @@
 /**
- * 音乐批量下载器主脚本（支持下载选中歌单，按钮功能随模式切换）
- * BY Enashpinal 
- * 详细注释覆盖所有核心功能与交互逻辑。
- * 
- * 下载相关逻辑已升级，已适配自建API POST下载接口：
- * - 文件名始终采用“歌名 - 歌手名”，而不是后端filename或自定义名。
- * - 非无损/hires音质全部保存为mp3扩展名，无损/hires按后端类型（优先flac）。
- * - 其它功能（搜索、歌单、分页、全选、预览等）全部原样保留。
- * 
- * 歌曲封面图和专辑封面图已适配 tenapi.cn/v2/songinfo 接口自动获取
+ * 音乐批量下载器主脚本（已根据版本 B 的封面获取逻辑改造）
+ * BY Enashpinal (改造说明见顶部注释)
+ *
+ * 改造摘要：
+ * 1. 去掉逐首调用 tenapi.cn 的 getSongCover，直接使用 Netease 返回的 song.al.picUrl
+ * 2. 歌单封面优先用 playlist.coverImgUrl，否则取第一首歌曲的 picUrl
+ * 3. 新增 normalizeCover + coverCache 以便后续拓展（当前逻辑简单）
+ * 4. 保留原 A 的功能（分页 / 批量下载 / 歌单模式 / 进度条）
  */
 
 // =======================
@@ -21,7 +19,7 @@ let searchType = '1'; // '1'单曲, '1000'歌单
 let searchKeywords = '';
 let selectedSongs = [];
 let playlistState = null;
-let currentMode = 'initial'; // 页面当前模式
+let currentMode = 'initial';
 let isDownloading = false;
 
 let selectedSongsIds = [];         // 当前选中的单曲ID列表
@@ -31,8 +29,22 @@ let allPlaylistMap = {};           // 当前页所有歌单对象映射
 let allSongIdsInPlaylist = [];     // 当前歌单所有歌曲ID（用于歌单详情页全选）
 let lastSongList = [];             // 当前页歌曲列表缓存
 
-const apiBase = 'https://musicapi.lxchen.cn';       // 自建API根地址
-const cloudApi = 'https://163api.qijieya.cn';      // 云API
+const apiBase = 'https://musicapi.lxchen.cn';  // 自建API根地址（用于 /download）
+const cloudApi = 'https://163api.qijieya.cn';  // 云API（与 B 保持一致）
+
+// 封面相关
+const DEFAULT_COVER = 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg';
+const coverCache = new Map();
+
+/**
+ * 封面规格统一（可根据需求调节：100 / 200 / 300）
+ * 网易云常用格式：picUrl + ?param=200y200
+ */
+function normalizeCover(url, size = 200) {
+    if (!url) return DEFAULT_COVER;
+    if (url.includes('?param=')) return url;
+    return `${url}?param=${size}y${size}`;
+}
 
 // =======================
 // 2. UI显示/动画相关方法
@@ -237,23 +249,38 @@ async function tryOpenPlaylistById(playlistId) {
 }
 
 /**
- * 获取歌曲封面（tenapi.cn/v2/songinfo）
- * @param {number|string} songId 
- * @returns {Promise<string>} 返回图片URL
+ * (改造后) 歌单封面获取：不再每首调用第三方 API
+ * @param {*} playlist
+ * @returns {Promise<string>}
  */
-async function getSongCover(songId) {
-    try {
-        const resp = await fetch('https://tenapi.cn/v2/songinfo', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `id=${songId}`
-        });
-        const result = await resp.json();
-        if (result.code === 200 && result.data && result.data.cover) {
-            return result.data.cover;
-        }
-    } catch (e) {}
-    return 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg'; // 默认
+async function getPlaylistCover(playlist) {
+    if (playlist.coverImgUrl) {
+        return normalizeCover(playlist.coverImgUrl, 200);
+    }
+    // 如果缺失封面，尝试用第一首歌的 picUrl
+    if (playlist.id && playlist.trackCount > 0) {
+        try {
+            const detail = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlist.id}&limit=1&offset=0`);
+            if (detail?.songs?.length) {
+                const s = detail.songs[0];
+                const url = s?.al?.picUrl;
+                if (url) return normalizeCover(url, 200);
+            }
+        } catch (e) { /* silent */ }
+    }
+    return DEFAULT_COVER;
+}
+
+/**
+ * (改造后) 直接使用 song.al?.picUrl
+ * 如果你后续需要再接入外部封面聚合，可在这里扩展
+ */
+function resolveSongCover(song) {
+    const id = String(song.id);
+    if (coverCache.has(id)) return coverCache.get(id);
+    const url = normalizeCover(song?.al?.picUrl || song?.album?.picUrl || '', 200);
+    coverCache.set(id, url);
+    return url;
 }
 
 function displaySongs(songs, containerId) {
@@ -264,19 +291,18 @@ function displaySongs(songs, containerId) {
         resultsDiv.innerHTML = '<p>无结果</p>';
         return;
     }
-    // 异步逐个渲染，保证封面获取
-    songs.forEach(async song => {
+    songs.forEach(song => {
         const idStr = String(song.id);
         const artists = song.ar ? song.ar.map(a => a.name).join(', ') : song.artists.map(a => a.name).join(', ');
         const checked = selectedSongsIds.includes(idStr) ? 'checked' : '';
-        const coverUrl = await getSongCover(idStr);
+        const coverUrl = resolveSongCover(song);
 
         const songDiv = document.createElement('div');
         songDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md transition-all duration-200';
         songDiv.innerHTML = `
             <input type="checkbox" class="song-checkbox w-5 h-5 mr-2 appearance-none border-2 border-gray-400 rounded checked:bg-blue-500 checked:border-blue-500 transition-all duration-200"
                 data-id="${idStr}" ${checked}>
-            <img src="${coverUrl}" alt="封面" class="w-12 h-12 rounded mr-2">
+            <img src="${coverUrl}" alt="封面" class="w-12 h-12 rounded mr-2 object-cover">
             <span class="flex-1 cursor-pointer" data-id="${idStr}">
                 ${song.name} <span class="text-gray-500 text-sm"> - ${artists}</span>
             </span>
@@ -307,21 +333,6 @@ function displaySongs(songs, containerId) {
     });
 }
 
-async function getPlaylistCover(playlist) {
-    // 方案1：使用歌单原coverImgUrl
-    if (playlist.coverImgUrl) return playlist.coverImgUrl;
-    // 方案2：用歌单第一首歌的封面
-    if (playlist.id && playlist.trackCount > 0) {
-        try {
-            const detail = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlist.id}&limit=1&offset=0`);
-            if (detail.songs && detail.songs.length > 0) {
-                return await getSongCover(detail.songs[0].id);
-            }
-        } catch (e) {}
-    }
-    return 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg';
-}
-
 function displayPlaylists(playlists) {
     renderBatchActionHeader();
     allPlaylistMap = {};
@@ -343,7 +354,7 @@ function displayPlaylists(playlists) {
         playlistDiv.dataset.trackCount = playlist.trackCount;
         playlistDiv.innerHTML = `
             <input type="checkbox" class="playlist-checkbox w-5 h-5 mr-2" data-id="${playlist.id}" ${checked}>
-            <img src="${playlistPic}" alt="封面" class="w-12 h-12 rounded mr-5">
+            <img src="${playlistPic}" alt="封面" class="w-12 h-12 rounded mr-5 object-cover">
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
         playlistDiv.addEventListener('click', (event) => {
@@ -470,7 +481,7 @@ function backHandler() {
 }
 
 // =======================
-// 5. 下载相关（原逻辑不变）
+// 5. 下载相关
 // =======================
 
 async function downloadSelectedSongs() {
@@ -489,7 +500,6 @@ async function downloadSelectedSongs() {
         let startTime = Date.now();
         for (let i = 0; i < total; i++) {
             const song = selectedSongs[i];
-            // 直接POST拿音频流
             const resp = await fetch(`${apiBase}/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -572,7 +582,6 @@ async function downloadSelectedPlaylists() {
                 songIdx++;
                 let id = song.id;
                 let songName = song.name + ' - ' + (song.ar ? song.ar.map(a=>a.name).join(',') : '');
-                // 直接POST拿音频流
                 const resp = await fetch(`${apiBase}/download`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -638,13 +647,12 @@ document.addEventListener('click', async (e) => {
             selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
         }
     }
-    // 预览按钮弹窗播放音频
+    // 预览按钮
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
         showLoading(true);
         try {
-            // 直接POST拿音频流
             const resp = await fetch(`${apiBase}/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -676,16 +684,15 @@ document.addEventListener('click', async (e) => {
             previewDiv.classList.add('hidden');
         }
     }
-    // 单曲下载按钮（每首右侧的小下载按钮，不是批量下载）
+    // 单曲下载按钮（单首）
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
-        const fileNameOrigin = e.target.closest('.download-btn').dataset.name; // “歌名 - 歌手名”
+        const fileNameOrigin = e.target.closest('.download-btn').dataset.name;
         const quality = document.getElementById('quality-select').value || 'standard';
         isDownloading = true;
         showLoading(true);
         showProgress(true, 0, "正在下载音频...");
         try {
-            // 直接POST拿音频流
             const resp = await fetch(`${apiBase}/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
