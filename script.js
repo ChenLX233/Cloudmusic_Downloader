@@ -1,12 +1,18 @@
 /**
- * 音乐批量下载器主脚本（已根据版本 B 的封面获取逻辑改造）
- * BY Enashpinal (改造说明见顶部注释)
- *
- * 改造摘要：
- * 1. 去掉逐首调用 tenapi.cn 的 getSongCover，直接使用 Netease 返回的 song.al.picUrl
- * 2. 歌单封面优先用 playlist.coverImgUrl，否则取第一首歌曲的 picUrl
- * 3. 新增 normalizeCover + coverCache 以便后续拓展（当前逻辑简单）
- * 4. 保留原 A 的功能（分页 / 批量下载 / 歌单模式 / 进度条）
+ * 音乐批量下载器主脚本（整合版）
+ * 集成内容：
+ * 1. 封面获取逻辑对齐版本 B：优先使用网易云返回的 song.al.picUrl / playlist.coverImgUrl
+ * 2. 去除逐首调用第三方 tenapi 接口的旧逻辑，减少不必要的网络请求
+ * 3. 新增 normalizeCover + coverCache；封面统一加尺寸参数（?param=200y200）便于控制
+ * 4. 歌单封面缺失时异步获取第一首歌曲封面并回填（不阻塞主列表渲染）
+ * 5. 修复“选择歌单后提示未选择”问题：使用事件委托监听动态插入的 playlist-checkbox
+ * 6. 保留原 A 的批量下载（通过自建 /download POST）、进度显示、批量全选、歌单内部全选等功能
+ * 7. 保持最小侵入修改，关注封面与歌单选择两大问题
+ * 
+ * 若需继续扩展：
+ * - 可在 resolveSongCover 中加入后端代理封面接口兜底
+ * - 可对 coverCache 增加 LRU 机制
+ * - 可添加“刷新封面”按钮清空缓存后重绘
  */
 
 // =======================
@@ -29,16 +35,18 @@ let allPlaylistMap = {};           // 当前页所有歌单对象映射
 let allSongIdsInPlaylist = [];     // 当前歌单所有歌曲ID（用于歌单详情页全选）
 let lastSongList = [];             // 当前页歌曲列表缓存
 
-const apiBase = 'https://musicapi.lxchen.cn';  // 自建API根地址（用于 /download）
-const cloudApi = 'https://163api.qijieya.cn';  // 云API（与 B 保持一致）
+const apiBase = 'https://musicapi.lxchen.cn';  // 自建API根地址（下载接口）
+const cloudApi = 'https://163api.qijieya.cn';  // 云API（搜索/歌单数据）
 
 // 封面相关
 const DEFAULT_COVER = 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg';
 const coverCache = new Map();
 
 /**
- * 封面规格统一（可根据需求调节：100 / 200 / 300）
- * 网易云常用格式：picUrl + ?param=200y200
+ * 统一封面尺寸（网易云支持 param=WxH）
+ * @param {string} url 
+ * @param {number} size 
+ * @returns {string}
  */
 function normalizeCover(url, size = 200) {
     if (!url) return DEFAULT_COVER;
@@ -96,7 +104,7 @@ function showLoading(show) {
 }
 
 /**
- * 支持超时和重试的 fetch 封装
+ * 支持超时与重试的请求
  */
 async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
     for (let i = 0; i <= retries; i++) {
@@ -112,7 +120,7 @@ async function fetchWithRetry(url, options = {}, retries = 1, timeout = 15000) {
         } catch (error) {
             clearTimeout(timeoutId);
             if (i < retries && error.name !== 'AbortError') {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(r => setTimeout(r, 1000));
                 continue;
             }
             throw error;
@@ -143,10 +151,8 @@ function renderBatchActionHeader() {
                     `${cloudApi}/cloudsearch?keywords=${encodeURIComponent(searchKeywords)}&type=1000&limit=${perPage}&offset=${i}`
                 );
                 let items = data?.result?.playlists || [];
-                allIds = allIds.concat(items.map(p=>String(p.id)));
-                items.forEach(p => {
-                    fullPlaylistMap[String(p.id)] = p;
-                });
+                allIds = allIds.concat(items.map(p => String(p.id)));
+                items.forEach(p => { fullPlaylistMap[String(p.id)] = p; });
             }
             showLoading(false);
             if (selectedPlaylistIds.length === allIds.length) {
@@ -176,7 +182,7 @@ function renderBatchActionHeader() {
 }
 
 // =======================
-// 4. 搜索逻辑与列表展示与分页
+// 4. 搜索逻辑与分页
 // =======================
 
 document.getElementById('search-btn').addEventListener('click', async () => {
@@ -248,16 +254,17 @@ async function tryOpenPlaylistById(playlistId) {
     }
 }
 
+// =======================
+// 5. 封面获取与展示
+// =======================
+
 /**
- * (改造后) 歌单封面获取：不再每首调用第三方 API
- * @param {*} playlist
- * @returns {Promise<string>}
+ * 歌单封面获取：优先 coverImgUrl，缺失时取第一首歌曲 picUrl
  */
 async function getPlaylistCover(playlist) {
     if (playlist.coverImgUrl) {
         return normalizeCover(playlist.coverImgUrl, 200);
     }
-    // 如果缺失封面，尝试用第一首歌的 picUrl
     if (playlist.id && playlist.trackCount > 0) {
         try {
             const detail = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlist.id}&limit=1&offset=0`);
@@ -266,14 +273,13 @@ async function getPlaylistCover(playlist) {
                 const url = s?.al?.picUrl;
                 if (url) return normalizeCover(url, 200);
             }
-        } catch (e) { /* silent */ }
+        } catch (_) {}
     }
     return DEFAULT_COVER;
 }
 
 /**
- * (改造后) 直接使用 song.al?.picUrl
- * 如果你后续需要再接入外部封面聚合，可在这里扩展
+ * 歌曲封面解析：直接取返回对象 al.picUrl（或 album.picUrl）
  */
 function resolveSongCover(song) {
     const id = String(song.id);
@@ -321,6 +327,7 @@ function displaySongs(songs, containerId) {
         resultsDiv.appendChild(songDiv);
         allSongsMap[idStr] = { id: idStr, name: song.name + ' - ' + artists };
     });
+    // 绑定歌曲复选框
     resultsDiv.querySelectorAll('.song-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
             const songId = this.dataset.id;
@@ -333,19 +340,23 @@ function displaySongs(songs, containerId) {
     });
 }
 
+/**
+ * 修复：不使用 forEach(async)。先同步渲染，缺封面时异步补齐
+ */
 function displayPlaylists(playlists) {
     renderBatchActionHeader();
     allPlaylistMap = {};
     const resultsDiv = document.getElementById('search-results');
     resultsDiv.innerHTML = '';
-    if (playlists.length === 0) {
+    if (!playlists || playlists.length === 0) {
         resultsDiv.innerHTML = '<p>无结果</p>';
         return;
     }
-    playlists.forEach(async playlist => {
+
+    playlists.forEach(playlist => {
         allPlaylistMap[playlist.id] = playlist;
         const checked = selectedPlaylistIds.includes(String(playlist.id)) ? 'checked' : '';
-        const playlistPic = await getPlaylistCover(playlist);
+        const immediateCover = playlist.coverImgUrl ? normalizeCover(playlist.coverImgUrl, 200) : DEFAULT_COVER;
 
         const playlistDiv = document.createElement('div');
         playlistDiv.className = 'flex items-center p-2 border-b hover:bg-gray-50 hover:shadow-md cursor-pointer transition-all duration-200';
@@ -354,9 +365,10 @@ function displayPlaylists(playlists) {
         playlistDiv.dataset.trackCount = playlist.trackCount;
         playlistDiv.innerHTML = `
             <input type="checkbox" class="playlist-checkbox w-5 h-5 mr-2" data-id="${playlist.id}" ${checked}>
-            <img src="${playlistPic}" alt="封面" class="w-12 h-12 rounded mr-5 object-cover">
+            <img src="${immediateCover}" data-pl-cover="${playlist.id}" alt="封面" class="w-12 h-12 rounded mr-5 object-cover">
             <span class="flex-1 playlist-title-span">${playlist.name} <span class="text-gray-500 text-sm">(${playlist.trackCount}首)</span></span>
         `;
+
         playlistDiv.addEventListener('click', (event) => {
             if (event.target.closest('input[type="checkbox"]')) return;
             currentMode = 'playlist-songs';
@@ -366,19 +378,28 @@ function displayPlaylists(playlists) {
             allSongsMap = {};
             openPlaylist(playlist.id, playlist.name, playlist.trackCount);
         });
+
         resultsDiv.appendChild(playlistDiv);
-    });
-    resultsDiv.querySelectorAll('.playlist-checkbox').forEach(cb => {
-        cb.addEventListener('change', function() {
-            const pid = String(this.dataset.id);
-            if (this.checked) {
-                if (!selectedPlaylistIds.includes(pid)) selectedPlaylistIds.push(pid);
-            } else {
-                selectedPlaylistIds = selectedPlaylistIds.filter(id => id !== pid);
-            }
-        });
+
+        if (!playlist.coverImgUrl && playlist.trackCount > 0) {
+            (async () => {
+                try {
+                    const detail = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlist.id}&limit=1&offset=0`);
+                    const first = detail?.songs?.[0];
+                    const firstCover = first?.al?.picUrl;
+                    if (firstCover) {
+                        const imgEl = resultsDiv.querySelector(`img[data-pl-cover="${playlist.id}"]`);
+                        if (imgEl) imgEl.src = normalizeCover(firstCover, 200);
+                    }
+                } catch (_) {}
+            })();
+        }
     });
 }
+
+// =======================
+// 6. 分页
+// =======================
 
 function renderPagination() {
     const paginationDiv = document.getElementById('pagination');
@@ -426,6 +447,10 @@ function updatePagination() {
     }
 }
 
+// =======================
+// 7. 打开歌单 & 全选
+// =======================
+
 async function openPlaylist(playlistId, playlistName, trackCount) {
     showLoading(true);
     const offset = (currentPage - 1) * itemsPerPage;
@@ -458,7 +483,7 @@ async function selectAllHandler() {
         let allIds = [];
         for (let i = 0; i < total; i += perPage) {
             let tracks = await fetchWithRetry(`${cloudApi}/playlist/track/all?id=${playlistState.id}&limit=${perPage}&offset=${i}`);
-            allIds = allIds.concat(tracks.songs.map(s=>String(s.id)));
+            allIds = allIds.concat(tracks.songs.map(s => String(s.id)));
         }
         allSongIdsInPlaylist = allIds;
     }
@@ -481,7 +506,7 @@ function backHandler() {
 }
 
 // =======================
-// 5. 下载相关
+// 8. 下载相关
 // =======================
 
 async function downloadSelectedSongs() {
@@ -503,7 +528,7 @@ async function downloadSelectedSongs() {
             const resp = await fetch(`${apiBase}/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: song.id, quality: quality })
+                body: JSON.stringify({ id: song.id, quality })
             });
             if (!resp.ok) continue;
             const contentType = resp.headers.get('Content-Type') || '';
@@ -513,8 +538,6 @@ async function downloadSelectedSongs() {
                 else if (/mp3/i.test(contentType)) ext = 'mp3';
                 else if (/m4a|aac/i.test(contentType)) ext = 'm4a';
                 else ext = 'flac';
-            } else {
-                ext = 'mp3';
             }
             let filename = `${song.name}.${ext}`;
             zip.file(filename, await resp.blob());
@@ -581,11 +604,11 @@ async function downloadSelectedPlaylists() {
             for (const song of allSongs) {
                 songIdx++;
                 let id = song.id;
-                let songName = song.name + ' - ' + (song.ar ? song.ar.map(a=>a.name).join(',') : '');
+                let songName = song.name + ' - ' + (song.ar ? song.ar.map(a => a.name).join(',') : '');
                 const resp = await fetch(`${apiBase}/download`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id, quality: quality })
+                    body: JSON.stringify({ id, quality })
                 });
                 if (!resp.ok) continue;
                 const contentType = resp.headers.get('Content-Type') || '';
@@ -601,15 +624,15 @@ async function downloadSelectedPlaylists() {
                 let filename = safeName(songName) + '.' + ext;
                 playlistZip.file(filename, await resp.blob());
 
-                let percent = Math.round((playlistIdx-1)/totalPlaylists*100 + songIdx/allSongs.length*100/totalPlaylists);
+                let percent = Math.round((playlistIdx - 1) / totalPlaylists * 100 + songIdx / allSongs.length * 100 / totalPlaylists);
                 let info = `正在下载: ${playlistName} (${songIdx}/${allSongs.length}) 歌单进度：${playlistIdx}/${totalPlaylists}`;
                 showProgress(true, percent, info);
             }
-            let playlistZipBlob = await playlistZip.generateAsync({type: 'blob'});
+            let playlistZipBlob = await playlistZip.generateAsync({ type: 'blob' });
             masterZip.file(safeName(playlistName) + '.zip', playlistZipBlob);
         }
         showProgress(true, 100, "正在生成总ZIP包...");
-        const masterZipBlob = await masterZip.generateAsync({type:'blob'});
+        const masterZipBlob = await masterZip.generateAsync({ type: 'blob' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(masterZipBlob);
         link.download = `歌单打包_${getNowTimeStr()}.zip`;
@@ -626,28 +649,30 @@ async function downloadSelectedPlaylists() {
 }
 
 // =======================
-// 6. 事件委托（预览/下载/复选框/返回）
+// 9. 事件委托（含歌单复选框修复）
 // =======================
 
 document.addEventListener('click', async (e) => {
     const previewDiv = document.getElementById('preview');
-    // 关闭预览弹窗
+    // 关闭预览
     if (!e.target.closest('#preview') && !e.target.closest('.preview-btn') && !previewDiv.classList.contains('hidden')) {
         previewDiv.classList.add('hidden');
         previewDiv.innerHTML = '';
     }
-    // 点击歌曲名区域切换勾选状态
+    // 点击歌曲名区域切换勾选
     if (e.target.closest('span.cursor-pointer')) {
         const checkbox = e.target.closest('span').parentElement.querySelector('.song-checkbox');
-        checkbox.checked = !checkbox.checked;
-        const songId = checkbox.dataset.id;
-        if (checkbox.checked) {
-            if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
-        } else {
-            selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            const songId = checkbox.dataset.id;
+            if (checkbox.checked) {
+                if (!selectedSongsIds.includes(songId)) selectedSongsIds.push(songId);
+            } else {
+                selectedSongsIds = selectedSongsIds.filter(id => id !== songId);
+            }
         }
     }
-    // 预览按钮
+    // 预览
     if (e.target.closest('.preview-btn')) {
         const songId = e.target.closest('.preview-btn').dataset.id;
         const quality = document.getElementById('quality-select').value || 'standard';
@@ -656,7 +681,7 @@ document.addEventListener('click', async (e) => {
             const resp = await fetch(`${apiBase}/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: songId, quality: quality })
+                body: JSON.stringify({ id: songId, quality })
             });
             if (!resp.ok) throw new Error('获取音频失败');
             const blob = await resp.blob();
@@ -684,7 +709,7 @@ document.addEventListener('click', async (e) => {
             previewDiv.classList.add('hidden');
         }
     }
-    // 单曲下载按钮（单首）
+    // 单首下载
     if (e.target.closest('.download-btn')) {
         const songId = e.target.closest('.download-btn').dataset.id;
         const fileNameOrigin = e.target.closest('.download-btn').dataset.name;
@@ -696,7 +721,7 @@ document.addEventListener('click', async (e) => {
             const resp = await fetch(`${apiBase}/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: songId, quality: quality })
+                body: JSON.stringify({ id: songId, quality })
             });
             if (!resp.ok) throw new Error('下载失败');
             const contentType = resp.headers.get('Content-Type') || '';
@@ -706,10 +731,8 @@ document.addEventListener('click', async (e) => {
                 else if (/mp3/i.test(contentType)) ext = 'mp3';
                 else if (/m4a|aac/i.test(contentType)) ext = 'm4a';
                 else ext = 'flac';
-            } else {
-                ext = 'mp3';
             }
-            let filename = `${fileNameOrigin}.${ext}`;
+            const filename = `${fileNameOrigin}.${ext}`;
             const blob = await resp.blob();
             showProgress(true, 100, "准备保存...");
             const link = document.createElement('a');
@@ -728,8 +751,20 @@ document.addEventListener('click', async (e) => {
     }
 });
 
+// 歌单复选框事件委托（解决异步渲染导致无法选中问题）
+document.getElementById('search-results').addEventListener('change', (e) => {
+    if (e.target && e.target.classList.contains('playlist-checkbox')) {
+        const pid = String(e.target.dataset.id);
+        if (e.target.checked) {
+            if (!selectedPlaylistIds.includes(pid)) selectedPlaylistIds.push(pid);
+        } else {
+            selectedPlaylistIds = selectedPlaylistIds.filter(id => id !== pid);
+        }
+    }
+});
+
 // =======================
-// 7. 工具函数
+// 10. 工具函数
 // =======================
 
 function getNowTimeStr() {
